@@ -6,6 +6,8 @@
 
 [下载最新版本](https://github.com/Tainiraito/pixiv-image-extractor/releases/latest) · [版本记录](https://github.com/Tainiraito/pixiv-image-extractor/releases) · [反馈问题](https://github.com/Tainiraito/pixiv-image-extractor/issues)
 
+<img src="docs/images/popup-zh-CN.png" alt="Pixiv 图片提取的下载弹窗：图片选择与下载按钮" width="380">
+
 ## 功能
 
 - 预览作品中的图片，逐张选择或全选；图片较多时可展开完整预览。

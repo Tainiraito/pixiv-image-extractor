@@ -6,6 +6,8 @@ A Chrome extension for previewing, selecting, and downloading original images fr
 
 [Download the latest release](https://github.com/Tainiraito/pixiv-image-extractor/releases/latest) · [Release history](https://github.com/Tainiraito/pixiv-image-extractor/releases) · [Report an issue](https://github.com/Tainiraito/pixiv-image-extractor/issues)
 
+<img src="docs/images/popup-zh-CN.png" alt="Pixiv Image Extractor download popup with image selection and download controls (Simplified Chinese interface)" width="380">
+
 ## Features
 
 - Preview images and select them individually or all at once. Expand the gallery to view larger collections.
