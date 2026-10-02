@@ -1,4 +1,4 @@
-// popup.js — Pixiv 图片提取 v1.3.0
+// popup.js — Pixiv 图片提取 v1.4.0
 
 document.addEventListener('DOMContentLoaded', () => {
     const header = document.getElementById('header');
@@ -14,14 +14,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedCount = document.getElementById('selected-count');
     const totalCount = document.getElementById('total-count');
     const toggleAllBtn = document.getElementById('toggle-all-btn');
-    const filenameSection = document.getElementById('filename-section');
+    const settingsDialog = document.getElementById('settings-dialog');
+    const settingsBtn = document.getElementById('settings-btn');
+    const historyDialog = document.getElementById('history-dialog');
+    const historyList = document.getElementById('history-list');
+    const taskOverflow = document.getElementById('task-overflow');
+    const galleryCollapse = document.getElementById('gallery-collapse');
     const filenameInput = document.getElementById('filename-input');
     const zipBatchSizeInput = document.getElementById('zip-batch-size');
     const zipBatchSizeHint = document.getElementById('zip-batch-size-hint');
+    const zipBatchValue = document.getElementById('zip-batch-value');
     const btnGroup = document.getElementById('btn-group');
     const downloadBtn = document.getElementById('download-btn');
     const zipBtn = document.getElementById('zip-btn');
-    const cancelBtn = document.getElementById('cancel-btn');
+    const taskSection = document.getElementById('task-section');
+    const taskList = document.getElementById('task-list');
+    const taskCount = document.getElementById('task-count');
     const statusText = document.getElementById('status-text');
 
     const TEMPLATE_STORAGE_KEY = 'pixiv_filename_template';
@@ -32,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ZIP_IMAGES_PER_PART,
         ZIP_BYTES_PER_PART
     } = PIXIV_EXTRACTOR_CONFIG;
-    const ACTIVE_JOB_STATUSES = new Set(['starting', 'running', 'cancelling']);
+    const ACTIVE_JOB_STATUSES = new Set(['starting', 'running', 'pausing', 'cancelling']);
 
     let allImages = [];
     let currentArtworkId = null;
@@ -40,8 +48,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentAuthor = '';
     let selectedIndices = new Set();
     let isBusy = false;
-    let currentJobId = null;
-    let currentJobStatus = null;
+    let isSubmitting = false;
+    let galleryExpanded = false;
+    let taskStates = [];
+    let taskRevision = -1;
+    const taskCards = new Map();
+    const historyCards = new Map();
+    const pendingTaskActions = new Set();
 
     // ─── 初始化 ───
     filenameInput.value = localStorage.getItem(TEMPLATE_STORAGE_KEY) || '';
@@ -53,27 +66,48 @@ document.addEventListener('DOMContentLoaded', () => {
     zipBatchSizeInput.value = normalizeZipBatchSize(
         localStorage.getItem(ZIP_BATCH_SIZE_STORAGE_KEY)
     );
+    zipBatchValue.value = zipBatchSizeInput.value + ' 张';
 
     chrome.runtime.onMessage.addListener((message, sender) => {
         if (sender.id !== chrome.runtime.id
             || message?.target !== 'popup'
-            || message.action !== 'download-job-status') {
+            || message.action !== 'download-jobs-status') {
             return;
         }
-        applyBackgroundJobState(message.state);
+        applyTaskSnapshot(message);
     });
 
     retryBtn.addEventListener('click', doExtract);
     filenameInput.addEventListener('input', () => {
         localStorage.setItem(TEMPLATE_STORAGE_KEY, filenameInput.value);
     });
-    zipBatchSizeInput.addEventListener('change', () => {
+    zipBatchSizeInput.addEventListener('input', () => {
         const batchSize = getZipBatchSize();
         zipBatchSizeInput.value = batchSize;
+        zipBatchValue.value = batchSize + ' 张';
         localStorage.setItem(ZIP_BATCH_SIZE_STORAGE_KEY, String(batchSize));
         updateSelectionUI();
     });
-    cancelBtn.addEventListener('click', cancelBackgroundJob);
+    taskList.addEventListener('click', handleTaskAction);
+    historyList.addEventListener('click', handleTaskAction);
+    document.getElementById('history-btn').addEventListener('click', () => historyDialog.showModal());
+    taskOverflow.addEventListener('click', () => historyDialog.showModal());
+    document.getElementById('history-close').addEventListener('click', () => historyDialog.close());
+    settingsBtn.addEventListener('click', () => settingsDialog.showModal());
+    document.getElementById('settings-close').addEventListener('click', () => settingsDialog.close());
+    for (const dialog of [settingsDialog, historyDialog]) dialog.addEventListener('click', event => {
+        if (event.target !== dialog) return;
+        const bounds = dialog.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right
+            || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close();
+    });
+    galleryCollapse.addEventListener('click', () => {
+        galleryExpanded = false;
+        renderGrid(allImages);
+        updateSelectionUI();
+        document.body.scrollTo(0, 0);
+        grid.querySelector('.gallery-more')?.focus({ preventScroll: true });
+    });
 
     doExtract();
     restoreBackgroundJob();
@@ -83,11 +117,11 @@ document.addEventListener('DOMContentLoaded', () => {
         header.style.display = 'none';
         grid.style.display = 'none';
         selectionInfo.style.display = 'none';
-        filenameSection.style.display = 'none';
+        galleryCollapse.hidden = true;
         btnGroup.style.display = 'none';
         errorState.style.display = 'none';
         loadingEl.style.display = '';
-        statusText.textContent = '';
+        setStatus('');
         syncTaskControls();
 
         try {
@@ -125,6 +159,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentTitle = String(response.title || '未知作品');
             currentAuthor = String(response.author || '未知作者');
             selectedIndices.clear();
+            galleryExpanded = false;
 
             titleEl.textContent = currentTitle;
             authorEl.textContent = currentAuthor;
@@ -135,7 +170,6 @@ document.addEventListener('DOMContentLoaded', () => {
             loadingEl.style.display = 'none';
             grid.style.display = '';
             selectionInfo.style.display = '';
-            filenameSection.style.display = '';
             btnGroup.style.display = '';
             updateSelectionUI();
             syncTaskControls();
@@ -145,114 +179,188 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ─── 后台任务状态 ───
+    // ─── 任务列表与操作 ───
     async function restoreBackgroundJob() {
-        try {
-            const response = await sendBackgroundRequest('get-download-job');
-            if (response.state) applyBackgroundJobState(response.state);
-        } catch (error) {
-            console.error('[后台任务] 恢复状态失败:', error);
-            setStatus(`无法读取后台任务：${getErrorMessage(error, '未知错误')}`, 'error');
-        }
+        try { applyTaskSnapshot(await sendBackgroundRequest('list-download-jobs')); }
+        catch (error) { setStatus('无法读取任务列表：' + getErrorMessage(error, '未知错误'), 'error'); }
     }
 
-    function applyBackgroundJobState(state) {
-        if (!state) return;
-
-        isBusy = ACTIVE_JOB_STATUSES.has(state.status);
-        currentJobId = isBusy ? state.jobId : null;
-        currentJobStatus = state.status;
+    function applyTaskSnapshot(snapshot) {
+        if (!Array.isArray(snapshot.tasks) || snapshot.revision < taskRevision) return;
+        taskRevision = snapshot.revision;
+        taskStates = snapshot.tasks;
         syncTaskControls();
-
-        const statusType = state.status === 'error' || (state.status === 'completed' && state.failed > 0)
-            ? 'error'
-            : state.status === 'completed' ? 'success' : 'info';
-        setStatus(state.message || '后台任务状态已更新', statusType);
+        renderTasks();
     }
 
     function beginSubmittingJob() {
         if (isBusy) return false;
-
-        isBusy = true;
-        currentJobId = null;
-        currentJobStatus = 'submitting';
-        cancelBtn.textContent = '正在提交...';
-        cancelBtn.disabled = true;
+        isSubmitting = true;
         syncTaskControls();
         return true;
     }
 
     function resetSubmittingJob() {
-        isBusy = false;
-        currentJobId = null;
-        currentJobStatus = null;
-        cancelBtn.textContent = '停止后台任务';
-        cancelBtn.disabled = false;
+        isSubmitting = false;
         syncTaskControls();
     }
 
     function syncTaskControls() {
+        isBusy = isSubmitting || taskStates.some(state => ACTIVE_JOB_STATUSES.has(state.status));
         filenameInput.disabled = isBusy;
         zipBatchSizeInput.disabled = isBusy;
-        cancelBtn.style.display = isBusy ? 'block' : 'none';
-
-        if (isBusy && currentJobId) {
-            const isCancelling = currentJobStatus === 'cancelling';
-            cancelBtn.textContent = isCancelling ? '正在停止...' : '停止后台任务';
-            cancelBtn.disabled = isCancelling;
-        }
         updateSelectionUI();
-    }
-
-    async function cancelBackgroundJob() {
-        if (!isBusy || !currentJobId || cancelBtn.disabled) return;
-
-        cancelBtn.disabled = true;
-        cancelBtn.textContent = '正在停止...';
-        setStatus('正在停止后台任务，已经创建的下载不会取消', 'info');
-
-        try {
-            const response = await sendBackgroundRequest('cancel-download-job', {
-                jobId: currentJobId
-            });
-            if (response.state) applyBackgroundJobState(response.state);
-        } catch (error) {
-            cancelBtn.disabled = false;
-            cancelBtn.textContent = '停止后台任务';
-            setStatus(`停止失败：${getErrorMessage(error, '未知错误')}`, 'error');
-        }
     }
 
     async function submitBackgroundJob(job) {
         try {
-            const response = await sendBackgroundRequest('start-download-job', { job });
-            applyBackgroundJobState(response.state);
-        } catch (error) {
+            const response = await sendBackgroundRequest('start-download-job', {
+                job: { ...job, title: currentTitle, artworkId: currentArtworkId }
+            });
+            applyTaskSnapshot(response);
+            setStatus('');
+        } finally {
             resetSubmittingJob();
-            throw error;
+            renderTasks();
         }
     }
 
     function sendBackgroundRequest(action, payload = {}) {
-        return chrome.runtime.sendMessage({
-            target: 'background',
-            action,
-            ...payload
-        }).then(response => {
-            if (!response?.success) {
-                throw new Error(response?.error || '后台服务无响应');
-            }
+        return chrome.runtime.sendMessage({ target: 'background', action, ...payload }).then(response => {
+            if (!response?.success) throw new Error(response?.error || '后台服务无响应');
             return response;
         });
+    }
+
+    function createTaskCard(state) {
+        const card = document.createElement('article');
+        card.className = 'task-card';
+        card.dataset.jobId = state.jobId;
+        const head = document.createElement('div');
+        head.className = 'task-head';
+        const title = document.createElement('div');
+        title.className = 'task-title';
+        const badge = document.createElement('span');
+        badge.className = 'task-badge';
+        const dismiss = makeTaskButton('dismiss-download-job', '×', 'task-dismiss');
+        dismiss.title = '移除记录，不删除已下载的文件';
+        head.append(title, badge, dismiss);
+
+        const progress = document.createElement('progress');
+        progress.className = 'task-progress';
+        const summary = document.createElement('div');
+        summary.className = 'task-summary';
+        const actions = document.createElement('div');
+        actions.className = 'task-actions';
+        const pause = makeTaskButton('pause-download-job', '暂停');
+        const resume = makeTaskButton('resume-download-job', '继续');
+        const retry = makeTaskButton('retry-download-job', '重试');
+        const stop = makeTaskButton('cancel-download-job', '停止');
+        actions.append(pause, resume, retry, stop);
+        const detail = document.createElement('div');
+        detail.className = 'task-detail';
+        detail.append(summary, actions);
+        card.append(head, detail, progress);
+        return { card, title, badge, dismiss, progress, summary, pause, resume, retry, stop };
+    }
+
+    function makeTaskButton(action, label, className = 'task-action') {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = className;
+        button.dataset.taskAction = action;
+        button.textContent = label;
+        return button;
+    }
+
+    function renderTasks() {
+        const unfinished = taskStates.filter(state => state.status !== 'completed' || state.failed > 0)
+            .sort((a, b) => Number(ACTIVE_JOB_STATUSES.has(b.status)) - Number(ACTIVE_JOB_STATUSES.has(a.status))
+                || (b.updatedAt || b.startedAt || 0) - (a.updatedAt || a.startedAt || 0));
+        taskSection.hidden = unfinished.length === 0;
+        taskCount.textContent = String(unfinished.length);
+        taskOverflow.hidden = unfinished.length <= 3;
+        document.getElementById('history-count').textContent = String(taskStates.length);
+        document.getElementById('history-empty').hidden = taskStates.length > 0;
+        renderTaskList(unfinished.slice(0, 3), taskList, taskCards);
+        renderTaskList(taskStates, historyList, historyCards);
+    }
+
+    function renderTaskList(states, list, cards) {
+        const ids = new Set(states.map(state => state.jobId));
+        for (const [id, nodes] of cards) {
+            if (!ids.has(id)) { nodes.card.remove(); cards.delete(id); }
+        }
+        const labels = { starting: '启动中', running: '进行中', pausing: '正在暂停',
+            paused: '已暂停', cancelling: '正在停止', cancelled: '已停止', completed: '已完成', error: '失败' };
+        states.forEach((state, index) => {
+            let nodes = cards.get(state.jobId);
+            if (!nodes) { nodes = createTaskCard(state); cards.set(state.jobId, nodes); }
+            const { card, title, badge, dismiss, progress, summary, pause, resume, retry, stop } = nodes;
+            if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
+            const failed = state.failed || 0;
+            const processed = state.processed || 0;
+            const total = state.total || 0;
+            const active = ACTIVE_JOB_STATUSES.has(state.status);
+            const transitioning = ['starting', 'pausing', 'cancelling'].includes(state.status);
+            const pending = pendingTaskActions.has(state.jobId);
+            const hasFailures = state.status === 'error' || failed > 0;
+            card.dataset.status = hasFailures ? 'error' : state.status;
+            title.textContent = state.title || 'Pixiv 图片';
+            title.title = title.textContent;
+            badge.textContent = state.status === 'completed' && failed > 0 ? '部分失败' : labels[state.status] || state.status;
+            progress.max = Math.max(1, total);
+            progress.value = Math.min(total, processed);
+            progress.setAttribute('aria-label', title.textContent + '，已处理 ' + processed + '/' + total);
+            summary.textContent = (state.type === 'zip' ? 'ZIP ' : '图片 ') + Math.max(0, processed - failed) + '/' + total
+                + (state.type === 'zip' ? ' · ' + (state.parts || 0) + ' 卷' : '')
+                + (failed ? ' · ' + failed + ' 张失败' : '');
+            summary.title = [state.artworkId ? '#' + state.artworkId : '', state.message].filter(Boolean).join(' · ');
+            card.setAttribute('aria-label', title.textContent + '，' + badge.textContent + '，' + summary.textContent);
+            dismiss.hidden = !['completed', 'error', 'cancelled'].includes(state.status);
+            dismiss.disabled = pending;
+            dismiss.setAttribute('aria-label', '移除任务：' + title.textContent);
+            pause.hidden = !active;
+            pause.disabled = transitioning || pending;
+            resume.hidden = !state.canResume;
+            resume.disabled = isBusy || pending;
+            retry.hidden = !state.canRetry;
+            retry.disabled = isBusy || pending;
+            for (const button of [resume, retry]) button.title = isBusy ? '请先暂停或停止正在执行的任务' : '';
+            stop.hidden = !active && state.status !== 'paused';
+            stop.disabled = transitioning || pending;
+        });
+    }
+
+    async function handleTaskAction(event) {
+        const button = event.target.closest('button[data-task-action]');
+        if (!button || button.disabled) return;
+        const jobId = button.closest('.task-card').dataset.jobId;
+        if (pendingTaskActions.has(jobId)) return;
+        pendingTaskActions.add(jobId);
+        renderTasks();
+        setStatus('');
+        try {
+            applyTaskSnapshot(await sendBackgroundRequest(button.dataset.taskAction, { jobId }));
+        } catch (error) {
+            setStatus(getErrorMessage(error, '任务操作失败'), 'error');
+        } finally {
+            pendingTaskActions.delete(jobId);
+            renderTasks();
+        }
     }
 
     // ─── 渲染与选择 ───
     function renderGrid(images) {
         grid.replaceChildren();
+        const collapsed = images.length > 9 && !galleryExpanded;
+        galleryCollapse.hidden = images.length <= 9 || !galleryExpanded;
+        const visibleImages = collapsed ? images.slice(0, 8) : images;
 
-        images.forEach((image, index) => {
+        visibleImages.forEach((image, index) => {
             const card = document.createElement('div');
             card.className = 'image-card';
+            card.dataset.imageIndex = String(index);
             card.tabIndex = 0;
             card.setAttribute('role', 'checkbox');
             card.setAttribute('aria-label', `选择图片 ${image.index}`);
@@ -281,6 +389,34 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             grid.appendChild(card);
         });
+        if (collapsed) {
+            const more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'gallery-more';
+            more.setAttribute('aria-label', '查看全部 ' + images.length + ' 张图片');
+            more.setAttribute('aria-expanded', 'false');
+            const mosaic = document.createElement('span');
+            mosaic.className = 'gallery-mosaic';
+            mosaic.setAttribute('aria-hidden', 'true');
+            for (let index = 0; index < 9; index++) {
+                const preview = document.createElement('img');
+                preview.src = images[8 + index % (images.length - 8)].previewUrl;
+                preview.alt = '';
+                preview.draggable = false;
+                mosaic.appendChild(preview);
+            }
+            const label = document.createElement('span');
+            label.className = 'gallery-more-label';
+            label.textContent = '查看全部' + images.length + '张';
+            more.append(mosaic, label);
+            more.addEventListener('click', () => {
+                galleryExpanded = true;
+                renderGrid(allImages);
+                updateSelectionUI();
+                grid.querySelector('[data-image-index="8"]')?.focus({ preventScroll: true });
+            });
+            grid.appendChild(more);
+        }
     }
 
     function toggleSelect(index) {
@@ -291,8 +427,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateSelectionUI() {
-        grid.querySelectorAll('.image-card').forEach((card, index) => {
-            const isSelected = selectedIndices.has(index);
+        grid.querySelectorAll('.image-card').forEach(card => {
+            const isSelected = selectedIndices.has(Number(card.dataset.imageIndex));
             card.classList.toggle('selected', isSelected);
             card.setAttribute('aria-checked', String(isSelected));
         });
@@ -307,12 +443,12 @@ document.addEventListener('DOMContentLoaded', () => {
         toggleAllBtn.disabled = isBusy;
 
         downloadBtn.disabled = isBusy || count === 0;
-        downloadBtn.textContent = count > 0 ? `后台下载 (${count})` : '后台下载';
+        downloadBtn.textContent = count > 1 ? `逐张下载 (${count})` : '下载';
 
         zipBtn.disabled = isBusy || count === 0;
         zipBtn.textContent = count > getZipBatchSize()
-            ? `后台分卷 (约 ${estimatedParts} 卷)`
-            : count > 0 ? `后台打包 (${count})` : '后台打包';
+            ? `分卷下载 (约 ${estimatedParts} 卷)`
+            : '打包下载';
     }
 
     toggleAllBtn.addEventListener('click', () => {
@@ -346,12 +482,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             });
 
-            setStatus('正在提交后台下载任务...', 'info');
+            setStatus('正在创建下载任务...', 'info');
             await submitBackgroundJob({ type: 'direct', images });
         } catch (error) {
             resetSubmittingJob();
             console.error('[后台下载] 启动失败:', error);
-            setStatus(`后台下载启动失败：${getErrorMessage(error, '未知错误')}`, 'error');
+            setStatus(`下载启动失败：${getErrorMessage(error, '未知错误')}`, 'error');
         }
     });
 
@@ -365,7 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 extension: getExtFromUrl(image.originalUrl)
             }));
 
-            setStatus('正在提交后台打包任务...', 'info');
+            setStatus('正在创建打包任务...', 'info');
             await submitBackgroundJob({
                 type: 'zip',
                 images,
@@ -376,7 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             resetSubmittingJob();
             console.error('[后台打包] 启动失败:', error);
-            setStatus(`后台打包启动失败：${getErrorMessage(error, '未知错误')}`, 'error');
+            setStatus(`打包启动失败：${getErrorMessage(error, '未知错误')}`, 'error');
         }
     });
 
@@ -479,6 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setStatus(text, type) {
         statusText.textContent = text;
+        statusText.hidden = !text;
         statusText.className = `status-text status-${type}`;
     }
 });

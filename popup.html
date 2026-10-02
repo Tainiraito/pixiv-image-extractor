@@ -17,6 +17,9 @@
             --accent-light: #dbeafe;
             --success: #10b981;
             --error: #ef4444;
+            --scrollbar-thumb: #cbd5e1;
+            --scrollbar-thumb-hover: #94a3b8;
+            --scrollbar-thumb-active: #64748b;
             --radius: 10px;
             --radius-sm: 6px;
             --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
@@ -24,11 +27,13 @@
             --transition: 150ms ease;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { width: 380px; overflow: hidden; }
         body {
-            width: 380px;
+            width: 100%;
             max-height: 560px;
             overflow-y: auto;
-            padding: 16px;
+            overflow-x: hidden;
+            padding: 0 16px 16px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 13px;
             line-height: 1.5;
@@ -36,7 +41,43 @@
             color: var(--text-primary);
         }
 
+        /* 简约滚动条：透明轨道、细圆角滑块，与浅色界面保持一致。 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-thumb);
+            border: 2px solid transparent;
+            border-radius: 999px;
+            background-clip: padding-box;
+            min-height: 32px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-thumb-hover); }
+        ::-webkit-scrollbar-thumb:active { background-color: var(--scrollbar-thumb-active); }
+        ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+        ::-webkit-scrollbar-corner { background: transparent; }
+        @supports not selector(::-webkit-scrollbar) {
+            html, body {
+                scrollbar-width: thin;
+                scrollbar-color: var(--scrollbar-thumb) transparent;
+            }
+        }
+
         /* Header */
+        .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: flex-start; gap: 8px; margin: 0 -16px 12px; padding: 16px; background: var(--bg-page); border-bottom: 1px solid var(--border); }
+        .topbar .header { flex: 1; min-width: 0; margin-bottom: 0; }
+        .header-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .icon-button { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; }
+        .icon-button:hover { color: var(--accent); border-color: var(--accent); }
+        .settings-dialog { margin: auto; width: calc(100% - 32px); padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-page); color: var(--text-primary); }
+        .settings-dialog::backdrop { background: rgba(26, 26, 46, .25); }
+        .history-dialog { max-height: calc(100vh - 32px); overflow: hidden; }
+        .history-dialog[open] { display: flex; flex-direction: column; }
+        .history-dialog .settings-head { flex: none; }
+        .history-dialog .task-list { flex: 1 1 auto; min-height: 0; max-height: 390px; }
+        .history-empty { padding: 24px 0; text-align: center; color: var(--text-muted); font-size: 12px; }
+        .task-overflow { border: 0; padding: 2px 0 2px 8px; font: inherit; font-size: 11px; color: var(--accent); background: transparent; cursor: pointer; }
+        .settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+        .settings-title { font-size: 14px; font-weight: 600; }
         .header { margin-bottom: 12px; }
         .header-title { font-size: 15px; font-weight: 700; }
         .header-meta { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
@@ -45,7 +86,7 @@
         /* Image Grid */
         .image-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 8px;
             margin-bottom: 14px;
         }
@@ -76,6 +117,13 @@
             padding: 2px 0; background: rgba(0,0,0,0.5);
             color: #fff; text-align: center; font-size: 10px; font-weight: 600;
         }
+        .gallery-more { position: relative; aspect-ratio: 1; overflow: hidden; border: 0; border-radius: var(--radius); cursor: pointer; background: var(--bg-card); }
+        .gallery-mosaic { position: absolute; inset: -3px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 2px; filter: blur(2px); }
+        .gallery-mosaic img { width: 100%; height: 100%; min-height: 0; object-fit: cover; }
+        .gallery-more-label { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(26, 26, 46, .45); color: #fff; font-family: inherit; font-size: 12px; font-weight: 600; text-align: center; }
+        #history-btn { margin-left: auto; }
+        .gallery-collapse { display: block; margin: -6px auto 10px; padding: 4px 12px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; }
+        button:focus-visible, .image-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
         /* Selection Info */
         .selection-info {
@@ -103,18 +151,17 @@
 
         /* ZIP 分卷设置 */
         .zip-settings {
-            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            display: block;
             margin-top: 10px; padding: 8px 10px;
             background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm);
         }
         .zip-settings-copy { min-width: 0; }
+        .zip-settings-heading { display: flex; align-items: center; justify-content: space-between; }
+        .zip-batch-value { font-size: 12px; font-weight: 600; color: var(--accent); }
         .zip-settings-title { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
         .zip-settings-hint { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
         .zip-batch-size {
-            flex: none; width: 58px; padding: 6px 4px;
-            border: 1px solid var(--border); border-radius: var(--radius-sm);
-            background: var(--bg-card); color: var(--text-primary);
-            font-family: inherit; font-size: 12px; text-align: center;
+            display: block; width: 100%; height: 20px; margin-top: 8px; cursor: pointer; accent-color: var(--accent);
         }
         .zip-batch-size:focus { outline: none; border-color: var(--accent); }
         .zip-batch-size:disabled { opacity: 0.65; cursor: not-allowed; }
@@ -140,11 +187,6 @@
             flex: none; padding: 5px 12px; font-size: 11px;
         }
         .btn-select:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-        .btn-cancel {
-            width: 100%; margin-bottom: 6px;
-            background: #fef2f2; color: var(--error); border: 1px solid #fecaca;
-        }
-        .btn-cancel:hover:not(:disabled) { background: #fee2e2; }
 
         /* Status */
         .status-text {
@@ -154,6 +196,42 @@
         .status-success { color: var(--success); }
         .status-error { color: var(--error); }
         .status-info { color: var(--accent); }
+
+        /* 下载任务：每个任务保留独立进度和操作入口。 */
+        [hidden] { display: none !important; }
+        .task-section { margin-top: 12px; }
+        .task-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+        .task-section-title { font-size: 12px; font-weight: 600; }
+        .task-count { font-size: 10px; color: var(--text-muted); }
+        .task-list { display: flex; flex-direction: column; gap: 8px; max-height: 230px; overflow-y: auto; }
+        .task-card { position: relative; flex: none; padding: 7px 9px 9px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); }
+        .task-head { display: flex; align-items: center; gap: 7px; }
+        .task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+        .task-badge { flex: none; padding: 1px 6px; border-radius: 5px; font-size: 10px; color: var(--accent); background: #eff6ff; }
+        .task-card[data-status="completed"] .task-badge { background: #ecfdf5; color: #059669; }
+        .task-card[data-status="error"] .task-badge { background: #fef2f2; color: var(--error); }
+        .task-card[data-status="paused"] .task-badge,
+        .task-card[data-status="cancelled"] .task-badge { background: #f1f5f9; color: var(--text-secondary); }
+        .task-dismiss { flex: none; width: 22px; height: 22px; border: none; border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 18px; line-height: 1; }
+        .task-dismiss:hover { color: var(--text-primary); background: #f1f5f9; }
+        .task-progress { display: block; appearance: none; width: 100%; height: 4px; margin: 8px 0 5px; border: 0; border-radius: 99px; overflow: hidden; background: #eef2f7; }
+        .task-progress::-webkit-progress-bar { background: #eef2f7; border-radius: 99px; }
+        .task-progress::-webkit-progress-value { background: var(--accent); border-radius: 99px; }
+        .task-progress::-moz-progress-bar { background: var(--accent); border-radius: 99px; }
+        .task-card[data-status="completed"] .task-progress::-webkit-progress-value { background: var(--success); }
+        .task-card[data-status="error"] .task-progress::-webkit-progress-value { background: var(--error); }
+        .task-card[data-status="paused"] .task-progress::-webkit-progress-value { background: var(--scrollbar-thumb-hover); }
+        .task-summary { font-size: 11px; color: var(--text-secondary); }
+        .task-detail { display: flex; align-items: center; gap: 6px; margin-top: 3px; min-height: 22px; }
+        .task-detail .task-summary { flex: 1; min-width: 0; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        .task-actions { flex: none; display: flex; gap: 5px; }
+        .task-card .task-progress { position: absolute; bottom: 0; left: 0; width: 100%; height: 2px; margin: 0; border-radius: 0; }
+        .task-actions:not(:has(> :not([hidden]))) { display: none; }
+        .task-action { padding: 2px 6px; font: inherit; font-size: 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--accent); cursor: pointer; }
+        .task-action:hover:not(:disabled) { background: #eff6ff; border-color: #bfdbfe; }
+        .task-action:disabled, .task-dismiss:disabled { opacity: .45; cursor: not-allowed; }
+        .task-action[data-task-action="cancel-download-job"] { color: var(--text-secondary); }
+        .task-action:focus-visible, .task-dismiss:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
         /* Loading */
         .loading { text-align: center; padding: 40px 0; color: var(--text-muted); }
@@ -183,9 +261,17 @@
     </style>
 </head>
 <body>
+    <div class="topbar">
     <div class="header" id="header" style="display:none">
         <div class="header-title" id="artwork-title"></div>
         <div class="header-meta"><span class="author" id="artwork-author"></span> · <span id="artwork-count"></span></div>
+    </div>
+    <button class="icon-button" id="history-btn" aria-label="任务列表" aria-haspopup="dialog" title="任务列表">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1 1 2-2m-3 7 1 1 2-2m-3 7 1 1 2-2"/></svg>
+    </button>
+    <button class="icon-button" id="settings-btn" aria-label="设置" aria-haspopup="dialog" title="设置">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.4-2 .9-2.2-.7-2 3.4 1.7 1.7v2.6L2.2 15l2 3.4 2.2-.7 2 .9L9 21h4l.6-2.4 2-.9 2.2.7 2-3.4-1.7-1.7v-2.6L19.8 9l-2-3.4-2.2.7-2-.9L13 3z"/><circle cx="11" cy="12" r="3"/></svg>
+    </button>
     </div>
 
     <div class="loading" id="loading">
@@ -200,6 +286,7 @@
     </div>
 
     <div class="image-grid" id="image-grid" style="display:none"></div>
+    <button class="gallery-collapse" id="gallery-collapse" hidden>收起图片</button>
 
     <div class="selection-info" id="selection-info" style="display:none">
         <div class="selection-text">已选择 <strong id="selected-count">0</strong> / <span id="total-count">0</span> 张</div>
@@ -207,31 +294,44 @@
     </div>
 
     <!-- 文件名模板 -->
-    <div class="filename-section" id="filename-section" style="display:none">
-        <label class="filename-label">下载文件名模板</label>
+    <dialog class="settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
+        <div class="settings-head"><span class="settings-title" id="settings-title">下载设置</span><button class="icon-button" id="settings-close" aria-label="关闭设置">×</button></div>
+    <div class="filename-section" id="filename-section">
+        <label class="filename-label" for="filename-input">下载文件名模板</label>
         <input class="filename-input" id="filename-input" type="text"
                placeholder="pixiv_{id}_{author}_{title}_p{index}">
         <div class="filename-hint">可用占位符：{id} {author} {title} {index}，留空使用默认</div>
 
         <div class="zip-settings">
             <div class="zip-settings-copy">
-                <div class="zip-settings-title">ZIP 每卷最多图片数</div>
+                <div class="zip-settings-heading"><label class="zip-settings-title" for="zip-batch-size">ZIP 每卷最多图片数</label><output class="zip-batch-value" id="zip-batch-value" for="zip-batch-size"></output></div>
                 <div class="zip-settings-hint" id="zip-batch-size-hint">正在加载分卷配置...</div>
             </div>
-            <input class="zip-batch-size" id="zip-batch-size" type="number"
+            <input class="zip-batch-size" id="zip-batch-size" type="range"
                    step="1" aria-label="ZIP 每卷最多图片数">
         </div>
     </div>
+    </dialog>
+    <dialog class="settings-dialog history-dialog" id="history-dialog" aria-labelledby="history-title">
+        <div class="settings-head"><span class="settings-title" id="history-title">任务列表 · <span id="history-count">0</span></span><button class="icon-button" id="history-close" aria-label="关闭任务列表">×</button></div>
+        <div class="history-empty" id="history-empty">暂无任务记录</div>
+        <div class="task-list" id="history-list" aria-label="全部任务记录"></div>
+    </dialog>
 
     <!-- 操作按钮 -->
     <div class="btn-group" id="btn-group" style="display:none">
-        <button class="btn btn-primary" id="download-btn" disabled>后台下载</button>
-        <button class="btn btn-outline" id="zip-btn" disabled>后台打包</button>
+        <button class="btn btn-primary" id="download-btn" disabled>下载</button>
+        <button class="btn btn-outline" id="zip-btn" disabled>打包下载</button>
     </div>
-    <button class="btn btn-cancel" id="cancel-btn" style="display:none">停止后台任务</button>
-
-    <div id="status-text" class="status-text" role="status" aria-live="polite"></div>
-    <div class="footer">v1.3.0 · Pixiv Image Extractor</div>
+    <div id="status-text" class="status-text" role="status" aria-live="polite" hidden></div>
+    <section class="task-section" id="task-section" aria-label="下载任务" hidden>
+        <div class="task-section-head">
+            <span class="task-section-title">下载任务</span>
+            <button class="task-overflow" id="task-overflow" title="查看全部未完成任务" hidden>共 <span id="task-count">0</span> 项 ›</button>
+        </div>
+        <div class="task-list" id="task-list" aria-label="任务列表"></div>
+    </section>
+    <div class="footer">v1.4.0 · Pixiv Image Extractor</div>
 
     <script src="config.js"></script>
     <script src="popup.js"></script>
