@@ -98,7 +98,26 @@
         }
         .filename-input:focus { outline: none; border-color: var(--accent); }
         .filename-input::placeholder { color: var(--text-muted); }
+        .filename-input:disabled { opacity: 0.65; cursor: not-allowed; }
         .filename-hint { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
+
+        /* ZIP 分卷设置 */
+        .zip-settings {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            margin-top: 10px; padding: 8px 10px;
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm);
+        }
+        .zip-settings-copy { min-width: 0; }
+        .zip-settings-title { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
+        .zip-settings-hint { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+        .zip-batch-size {
+            flex: none; width: 58px; padding: 6px 4px;
+            border: 1px solid var(--border); border-radius: var(--radius-sm);
+            background: var(--bg-card); color: var(--text-primary);
+            font-family: inherit; font-size: 12px; text-align: center;
+        }
+        .zip-batch-size:focus { outline: none; border-color: var(--accent); }
+        .zip-batch-size:disabled { opacity: 0.65; cursor: not-allowed; }
 
         /* Buttons */
         .btn-group { display: flex; gap: 8px; margin-bottom: 6px; }
@@ -108,20 +127,24 @@
             cursor: pointer; transition: all var(--transition);
         }
         .btn:active { transform: scale(0.97); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-primary { background: var(--accent); color: #fff; }
         .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-outline {
             background: var(--bg-card); color: var(--text-secondary);
             border: 1px solid var(--border);
         }
         .btn-outline:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-        .btn-outline:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-select {
             background: var(--bg-card); color: var(--text-secondary); border: 1px solid var(--border);
             flex: none; padding: 5px 12px; font-size: 11px;
         }
-        .btn-select:hover { border-color: var(--accent); color: var(--accent); }
+        .btn-select:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+        .btn-cancel {
+            width: 100%; margin-bottom: 6px;
+            background: #fef2f2; color: var(--error); border: 1px solid #fecaca;
+        }
+        .btn-cancel:hover:not(:disabled) { background: #fee2e2; }
 
         /* Status */
         .status-text {
@@ -189,18 +212,28 @@
         <input class="filename-input" id="filename-input" type="text"
                placeholder="pixiv_{id}_{author}_{title}_p{index}">
         <div class="filename-hint">可用占位符：{id} {author} {title} {index}，留空使用默认</div>
+
+        <div class="zip-settings">
+            <div class="zip-settings-copy">
+                <div class="zip-settings-title">ZIP 每卷最多图片数</div>
+                <div class="zip-settings-hint" id="zip-batch-size-hint">正在加载分卷配置...</div>
+            </div>
+            <input class="zip-batch-size" id="zip-batch-size" type="number"
+                   step="1" aria-label="ZIP 每卷最多图片数">
+        </div>
     </div>
 
     <!-- 操作按钮 -->
     <div class="btn-group" id="btn-group" style="display:none">
-        <button class="btn btn-primary" id="download-btn" disabled>下载选中</button>
-        <button class="btn btn-outline" id="zip-btn" disabled>打包下载</button>
+        <button class="btn btn-primary" id="download-btn" disabled>后台下载</button>
+        <button class="btn btn-outline" id="zip-btn" disabled>后台打包</button>
     </div>
+    <button class="btn btn-cancel" id="cancel-btn" style="display:none">停止后台任务</button>
 
-    <div id="status-text" class="status-text"></div>
-    <div class="footer">v1.2 · Pixiv Image Extractor</div>
+    <div id="status-text" class="status-text" role="status" aria-live="polite"></div>
+    <div class="footer">v1.3.0 · Pixiv Image Extractor</div>
 
-    <script src="lib/jszip.min.js"></script>
+    <script src="config.js"></script>
     <script src="popup.js"></script>
 </body>
 </html>

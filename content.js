@@ -1,9 +1,10 @@
-// content.js — Pixiv 图片提取 v1.1
+// content.js — Pixiv 图片提取 v1.3.0
 // 在 Pixiv 作品页面提取所有图片 URL 和作品信息
 // Referer 头由 declarativeNetRequest 规则自动添加
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'extract-images') {
+    // 只处理本扩展自身发出的消息，避免其他来源触发带登录态的 Pixiv API 请求。
+    if (sender.id === chrome.runtime.id && message?.action === 'extract-images') {
         handleExtract()
             .then(sendResponse)
             .catch(err => sendResponse({ success: false, error: err.message || '未知错误' }));
@@ -71,15 +72,15 @@ async function fetchArtworkDetail(artworkId) {
 // ─── API: 获取所有图片页面 URL ───
 
 async function fetchArtworkPages(artworkId) {
-    try {
-        const resp = await fetch(`https://www.pixiv.net/ajax/illust/${artworkId}/pages`);
-        if (!resp.ok) return null;
-
-        const data = await resp.json();
-        if (data.error || !data.body) return null;
-
-        return data.body;
-    } catch {
-        return null;
+    const resp = await fetch(`https://www.pixiv.net/ajax/illust/${artworkId}/pages`);
+    if (!resp.ok) {
+        throw new Error(`获取图片列表失败：HTTP ${resp.status}`);
     }
+
+    const data = await resp.json();
+    if (data.error || !Array.isArray(data.body)) {
+        throw new Error(data.message || 'Pixiv 返回的图片列表格式异常');
+    }
+
+    return data.body;
 }
