@@ -13,7 +13,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === 'start-job') {
         if (activeJob) {
-            sendResponse({ accepted: false, error: '后台执行器已有任务正在运行' });
+            sendResponse({ accepted: false, ...PixivMessages.make('error.executorBusy') });
             return false;
         }
         const job = message.job;
@@ -73,20 +73,20 @@ async function runJob(context) {
     let status, message;
     if (error) {
         status = 'error';
-        message = error.message || '下载失败，可重试';
+        message = PixivMessages.describe(error, 'error.download');
     } else if (context.intent === 'pause') {
         status = 'paused';
-        message = '已暂停，继续时跳过已保存的图片';
+        message = PixivMessages.make('job.paused');
     } else if (context.intent === 'cancel') {
         status = 'cancelled';
-        message = '已停止，已提交下载继续执行';
+        message = PixivMessages.make('job.stopped');
     } else {
         status = 'completed';
         message = context.failed.size
-            ? '已处理 ' + context.job.images.length + ' 张，' + context.failed.size + ' 张失败，可重试'
+            ? PixivMessages.make('job.partial', { total: context.job.images.length, failed: context.failed.size })
             : context.job.type === 'zip'
-                ? '打包完成：' + context.completed.size + ' 张图片，共 ' + (context.checkpoint.nextPart - 1) + ' 个 ZIP'
-                : '已下载 ' + context.completed.size + ' 张图片';
+                ? PixivMessages.make('job.zipComplete', { count: context.completed.size, parts: context.checkpoint.nextPart - 1 })
+                : PixivMessages.make('job.complete', { count: context.completed.size });
     }
     completingJobId = context.job.jobId;
     activeJob = null;
@@ -103,7 +103,7 @@ async function runDirectJob(context) {
         if (context.completed.has(index) || context.failed.has(index)) continue;
         const image = context.job.images[index];
         try {
-            await reportStatus(context, 'running', '正在读取原图 ' + (index + 1) + '/' + context.job.images.length);
+            await reportStatus(context, 'running', PixivMessages.make('job.reading', { index: index + 1, total: context.job.images.length }));
             const blob = await fetchImageBlob(context, image.url);
             if (context.controller.signal.aborted) break;
             const unit = { indices: [index], partNumber: 0 };
@@ -115,8 +115,7 @@ async function runDirectJob(context) {
             context.failed.add(index);
             context.checkpoint.pendingUnit = null;
         }
-        await reportStatus(context, 'running', '已处理 ' + (context.completed.size + context.failed.size)
-            + '/' + context.job.images.length + ' 张');
+        await reportStatus(context, 'running', PixivMessages.make('job.processed', { processed: context.completed.size + context.failed.size, total: context.job.images.length }));
         await delay(100);
     }
 }
@@ -141,7 +140,7 @@ async function restorePendingUnit(context) {
         context.checkpoint.pendingUnit = null;
         if (context.job.retry) return; // 已完成检查点不变，重新构建未完成的部分。
         for (const index of unit.indices) context.failed.add(index);
-        throw new Error('之前的下载已中断，请点击重试');
+        throw PixivMessages.error('error.interruptedPrevious');
     }
     if (!entry) {
         entry = { downloadId: unit.downloadId, blobUrl: null, jobId: context.job.jobId };
@@ -149,7 +148,7 @@ async function restorePendingUnit(context) {
         entry.completion = monitorBrowserDownload(entry);
     }
     await setDownloadPaused(unit.downloadId, false);
-    await reportStatus(context, 'running', '正在继续之前的下载…');
+    await reportStatus(context, 'running', PixivMessages.make('job.resuming'));
     if (await waitForBrowserDownload(context, entry)) commitUnit(context, unit);
 }
 function createBundle(job) {
@@ -166,7 +165,7 @@ async function runZipJob(context) {
             if (!await flushBundle(context, bundle, true)) return;
             bundle = createBundle(job);
         }
-        await reportStatus(context, 'running', '正在读取原图 ' + (index + 1) + '/' + job.images.length);
+        await reportStatus(context, 'running', PixivMessages.make('job.reading', { index: index + 1, total: job.images.length }));
         let blob;
         try { blob = await fetchImageBlob(context, job.images[index].url); }
         catch (error) {
@@ -187,13 +186,13 @@ async function runZipJob(context) {
 }
 async function flushBundle(context, bundle, hasMore) {
     const partNumber = context.checkpoint.nextPart;
-    await reportStatus(context, 'running', '正在生成 ZIP（' + bundle.indices.length + ' 张）…');
+    await reportStatus(context, 'running', PixivMessages.make('job.zipBuilding', { count: bundle.indices.length }));
     let lastPercent = -10;
     const blob = await bundle.zip.generateAsync({ type: 'blob', streamFiles: true, compression: 'STORE' }, metadata => {
         const percent = Math.round(metadata.percent || 0);
         if (percent - lastPercent < 10) return;
         lastPercent = percent;
-        reportStatus(context, 'running', '正在生成 ZIP ' + percent + '%').catch(() => {});
+        reportStatus(context, 'running', PixivMessages.make('job.zipPercent', { percent })).catch(() => {});
     });
     if (context.controller.signal.aborted) return false;
     const numbered = hasMore || partNumber > 1;
@@ -219,14 +218,14 @@ async function submitUnit(context, blob, unit, filename) {
     entry.completion = monitorBrowserDownload(entry);
     // 处理暂停恰好发生在 Chrome 创建下载回调之前的情况。
     if (context.intent === 'pause') await setDownloadPaused(downloadId, true);
-    await reportStatus(context, 'running', context.job.type === 'zip' ? '正在写入 ZIP…' : '正在保存图片…');
+    await reportStatus(context, 'running', PixivMessages.make(context.job.type === 'zip' ? 'job.zipSaving' : 'job.imageSaving'));
     return waitForBrowserDownload(context, entry);
 }
 async function fetchImageBlob(context, url) {
     const response = await fetch(url, { signal: context.controller.signal });
-    if (!response.ok) throw new Error('图片请求失败：HTTP ' + response.status);
+    if (!response.ok) throw PixivMessages.error('error.imageHttp', { status: response.status });
     const contentType = response.headers.get('content-type') || '';
-    if (contentType && !contentType.toLowerCase().startsWith('image/')) throw new Error('图片响应类型异常：' + contentType);
+    if (contentType && !contentType.toLowerCase().startsWith('image/')) throw PixivMessages.error('error.imageType', { type: contentType });
     return response.blob();
 }
 async function setDownloadPaused(downloadId, paused) {
@@ -250,7 +249,7 @@ async function waitForBrowserDownload(context, entry) {
     try {
         const outcome = await Promise.race([entry.completion, cancelled]);
         if (outcome.cancelled) return false;
-        if (outcome.error) throw new Error('下载中断：' + outcome.error);
+        if (outcome.error) throw PixivMessages.error('error.interrupted', { detail: outcome.error });
         return true;
     } finally { signal.removeEventListener('abort', onAbort); }
 }
@@ -262,7 +261,7 @@ async function monitorBrowserDownload(entry) {
                 if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
                 pendingDownloads.delete(entry.downloadId);
                 requestIdleClose();
-                return { error: download.state === 'interrupted' ? download.error || '未知原因' : null };
+                return { error: download.state === 'interrupted' ? download.error || 'UNKNOWN'  : null };
             }
         } catch (error) { console.error('[下载监控]', error); }
         await delay(DOWNLOAD_POLL_INTERVAL_MS);
@@ -275,12 +274,12 @@ async function requestIdleClose() {
 async function reportStatus(context, status, message) {
     await sendBackgroundRequest('job-status-update', { update: {
         jobId: context.job.jobId, runId: context.job.runId, sequence: ++context.sequence,
-        status, message, ...progressFor(context)
+        status, ...message, ...progressFor(context)
     } });
 }
 async function sendBackgroundRequest(action, payload = {}) {
     const response = await chrome.runtime.sendMessage({ target: 'background', action, ...payload });
-    if (!response?.success) throw new Error(response?.error || '后台服务无响应');
+    if (!response?.success) throw PixivMessages.fromResponse(response);
     return response;
 }
 function delay(milliseconds) { return new Promise(resolve => setTimeout(resolve, milliseconds)); }

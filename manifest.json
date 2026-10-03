@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Pixiv 图片提取",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "后台提取并下载 Pixiv 高清图片，支持任务列表、暂停继续、失败重试和低内存分卷打包",
     "minimum_chrome_version": "116",
     "permissions": [
@@ -29,7 +29,7 @@
                 "https://www.pixiv.net/illust/*",
                 "https://www.pixiv.net/users/*/artworks/*"
             ],
-            "js": ["content.js"]
+            "js": ["messages.js", "content.js"]
         }
     ],
     "declarative_net_request": {

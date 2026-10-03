@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pixiv 图片提取</title>
+    <title data-i18n="app.title">Pixiv 图片提取</title>
     <style>
         :root {
             --bg-page: #f5f7fa;
@@ -258,6 +258,13 @@
             text-align: center; margin-top: 12px; padding-top: 10px;
             border-top: 1px solid var(--border); font-size: 10px; color: var(--text-muted);
         }
+        .auto-close-setting { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; cursor: pointer; }
+        .auto-close-copy { flex: 1; min-width: 0; }
+        .auto-close-title { display: block; font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+        .auto-close-hint { display: block; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+        #auto-close-popup { flex: none; width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+        .language-section { margin-bottom: 14px; }
+        html[lang="en"] .selection-text { font-size: 11px; }
     </style>
 </head>
 <body>
@@ -266,74 +273,85 @@
         <div class="header-title" id="artwork-title"></div>
         <div class="header-meta"><span class="author" id="artwork-author"></span> · <span id="artwork-count"></span></div>
     </div>
-    <button class="icon-button" id="history-btn" aria-label="任务列表" aria-haspopup="dialog" title="任务列表">
+    <button class="icon-button" id="history-btn" aria-label="任务列表" data-i18n-aria-label="history.title" aria-haspopup="dialog" title="任务列表" data-i18n-title="history.title">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1 1 2-2m-3 7 1 1 2-2m-3 7 1 1 2-2"/></svg>
     </button>
-    <button class="icon-button" id="settings-btn" aria-label="设置" aria-haspopup="dialog" title="设置">
+    <button class="icon-button" id="settings-btn" aria-label="设置" data-i18n-aria-label="settings.open" aria-haspopup="dialog" title="设置" data-i18n-title="settings.open">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.4-2 .9-2.2-.7-2 3.4 1.7 1.7v2.6L2.2 15l2 3.4 2.2-.7 2 .9L9 21h4l.6-2.4 2-.9 2.2.7 2-3.4-1.7-1.7v-2.6L19.8 9l-2-3.4-2.2.7-2-.9L13 3z"/><circle cx="11" cy="12" r="3"/></svg>
     </button>
     </div>
 
     <div class="loading" id="loading">
         <div class="loading-spinner"></div>
-        <div>正在获取图片...</div>
+        <div data-i18n="loading">正在获取图片...</div>
     </div>
 
     <div class="error-state" id="error-state" style="display:none">
         <div class="error-icon">😕</div>
         <div class="error-msg" id="error-msg"></div>
-        <button class="btn-retry" id="retry-btn">重新提取</button>
+        <button class="btn-retry" id="retry-btn" data-i18n="extract.retry">重新提取</button>
     </div>
 
     <div class="image-grid" id="image-grid" style="display:none"></div>
-    <button class="gallery-collapse" id="gallery-collapse" hidden>收起图片</button>
+    <button class="gallery-collapse" id="gallery-collapse" hidden data-i18n="gallery.collapse">收起图片</button>
 
     <div class="selection-info" id="selection-info" style="display:none">
-        <div class="selection-text">已选择 <strong id="selected-count">0</strong> / <span id="total-count">0</span> 张</div>
-        <button class="btn btn-select" id="toggle-all-btn">全选</button>
+        <div class="selection-text"><span data-i18n="selection.before">已选择</span> <strong id="selected-count">0</strong> / <span id="total-count">0</span> <span data-i18n="selection.after">张</span></div>
+        <button class="btn btn-select" id="toggle-all-btn" data-i18n="selection.all">全选</button>
     </div>
 
     <!-- 文件名模板 -->
     <dialog class="settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
-        <div class="settings-head"><span class="settings-title" id="settings-title">下载设置</span><button class="icon-button" id="settings-close" aria-label="关闭设置">×</button></div>
+        <div class="settings-head"><span class="settings-title" id="settings-title" data-i18n="settings.title">下载设置</span><button class="icon-button" id="settings-close" aria-label="关闭设置" data-i18n-aria-label="settings.close">×</button></div>
+        <div class="language-section">
+            <label class="filename-label" for="language-select">语言 / Language</label>
+            <select class="filename-input" id="language-select"></select>
+        </div>
+        <label class="auto-close-setting" for="auto-close-popup">
+            <span class="auto-close-copy"><span class="auto-close-title" data-i18n="settings.autoClose">下载后自动关闭弹窗</span><span class="auto-close-hint" data-i18n="settings.autoCloseHint">任务启动后关闭弹窗，后台下载继续进行</span></span>
+            <input id="auto-close-popup" type="checkbox" checked>
+        </label>
     <div class="filename-section" id="filename-section">
-        <label class="filename-label" for="filename-input">下载文件名模板</label>
+        <label class="filename-label" for="filename-input" data-i18n="settings.filename">下载文件名模板</label>
         <input class="filename-input" id="filename-input" type="text"
                placeholder="pixiv_{id}_{author}_{title}_p{index}">
-        <div class="filename-hint">可用占位符：{id} {author} {title} {index}，留空使用默认</div>
+        <div class="filename-hint" data-i18n="settings.placeholders">可用占位符：{id} {author} {title} {index}，留空使用默认</div>
 
         <div class="zip-settings">
             <div class="zip-settings-copy">
-                <div class="zip-settings-heading"><label class="zip-settings-title" for="zip-batch-size">ZIP 每卷最多图片数</label><output class="zip-batch-value" id="zip-batch-value" for="zip-batch-size"></output></div>
-                <div class="zip-settings-hint" id="zip-batch-size-hint">正在加载分卷配置...</div>
+                <div class="zip-settings-heading"><label class="zip-settings-title" for="zip-batch-size" data-i18n="settings.zip">ZIP 每卷最多图片数</label><output class="zip-batch-value" id="zip-batch-value" for="zip-batch-size"></output></div>
+                <div class="zip-settings-hint" id="zip-batch-size-hint" data-i18n="settings.zipLoading">正在加载分卷配置...</div>
             </div>
             <input class="zip-batch-size" id="zip-batch-size" type="range"
-                   step="1" aria-label="ZIP 每卷最多图片数">
+                   step="1" aria-label="ZIP 每卷最多图片数" data-i18n-aria-label="settings.zip">
         </div>
     </div>
     </dialog>
     <dialog class="settings-dialog history-dialog" id="history-dialog" aria-labelledby="history-title">
-        <div class="settings-head"><span class="settings-title" id="history-title">任务列表 · <span id="history-count">0</span></span><button class="icon-button" id="history-close" aria-label="关闭任务列表">×</button></div>
-        <div class="history-empty" id="history-empty">暂无任务记录</div>
-        <div class="task-list" id="history-list" aria-label="全部任务记录"></div>
+        <div class="settings-head"><span class="settings-title" id="history-title"><span data-i18n="history.title">任务列表</span> · <span id="history-count">0</span></span><button class="icon-button" id="history-close" aria-label="关闭任务列表" data-i18n-aria-label="history.close">×</button></div>
+        <div class="history-empty" id="history-empty" data-i18n="history.empty">暂无任务记录</div>
+        <div class="task-list" id="history-list" aria-label="全部任务记录" data-i18n-aria-label="history.all"></div>
     </dialog>
 
     <!-- 操作按钮 -->
     <div class="btn-group" id="btn-group" style="display:none">
-        <button class="btn btn-primary" id="download-btn" disabled>下载</button>
-        <button class="btn btn-outline" id="zip-btn" disabled>打包下载</button>
+        <button class="btn btn-primary" id="download-btn" disabled data-i18n="download.single">下载</button>
+        <button class="btn btn-outline" id="zip-btn" disabled data-i18n="download.zip">打包下载</button>
     </div>
     <div id="status-text" class="status-text" role="status" aria-live="polite" hidden></div>
-    <section class="task-section" id="task-section" aria-label="下载任务" hidden>
+    <section class="task-section" id="task-section" aria-label="下载任务" data-i18n-aria-label="task.heading" hidden>
         <div class="task-section-head">
-            <span class="task-section-title">下载任务</span>
-            <button class="task-overflow" id="task-overflow" title="查看全部未完成任务" hidden>共 <span id="task-count">0</span> 项 ›</button>
+            <span class="task-section-title" data-i18n="task.heading">下载任务</span>
+            <button class="task-overflow" id="task-overflow" title="查看全部未完成任务" data-i18n-title="history.unfinished" hidden><span id="task-overflow-label"></span><span id="task-count" hidden>0</span></button>
         </div>
-        <div class="task-list" id="task-list" aria-label="任务列表"></div>
+        <div class="task-list" id="task-list" aria-label="任务列表" data-i18n-aria-label="history.title"></div>
     </section>
-    <div class="footer">v1.4.0 · Pixiv Image Extractor</div>
+    <div class="footer">v1.5.0 · Pixiv Image Extractor</div>
 
     <script src="config.js"></script>
+    <script src="messages.js"></script>
+    <script src="locales/index.js"></script>
+    <script src="i18n.js"></script>
     <script src="popup.js"></script>
 </body>
 </html>

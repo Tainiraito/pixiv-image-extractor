@@ -30,12 +30,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.target !== 'background') return false;
     handleMessage(message, sender)
         .then(result => sendResponse({ success: true, ...result }))
-        .catch(error => sendResponse({ success: false, error: getErrorMessage(error, '后台任务处理失败') }));
+        .catch(error => sendResponse({ success: false, error: error.message, ...PixivMessages.describe(error, 'error.processing') }));
     return true;
 });
 
 async function handleMessage(message, sender) {
-    if (sender.id !== chrome.runtime.id) throw new Error('拒绝处理非本扩展来源的消息');
+    if (sender.id !== chrome.runtime.id) throw PixivMessages.error('error.sender');
     if (['job-status-update', 'create-browser-download', 'get-browser-download',
         'control-browser-download', 'close-offscreen-document'].includes(message.action)) {
         assertOffscreenSender(sender);
@@ -60,7 +60,7 @@ async function handleMessage(message, sender) {
         case 'get-browser-download': return getBrowserDownload(message.downloadId);
         case 'control-browser-download': return controlBrowserDownload(message.downloadId, message.operation);
         case 'close-offscreen-document': return closeOffscreenDocumentForJob(message.jobId);
-        default: throw new Error('未知后台操作：' + (message.action || '空'));
+        default: throw PixivMessages.error('error.action', { action: message.action || '' });
     }
 }
 
@@ -69,7 +69,7 @@ async function getTaskStore() {
     if (result[TASK_STORE_KEY]) return result[TASK_STORE_KEY];
     const legacy = await chrome.storage.session.get(JOB_STATE_KEY);
     const state = legacy[JOB_STATE_KEY];
-    return { revision: 0, tasks: state ? [{ ...state, title: '之前的下载任务', job: null }] : [] };
+    return { revision: 0, tasks: state ? [{ ...state, title: '', titleKey: 'task.legacyTitle', job: null }] : [] };
 }
 function currentState(store) {
     return store.tasks.find(task => ACTIVE_JOB_STATUSES.has(task.status)) || store.tasks[0] || null;
@@ -95,7 +95,7 @@ async function saveTaskStore(store) {
 }
 function findTask(store, jobId) {
     const task = store.tasks.find(item => item.jobId === jobId);
-    if (!task) throw new Error('任务已移除，请刷新任务列表');
+    if (!task) throw PixivMessages.error('error.removed');
     return task;
 }
 function emptyCheckpoint() {
@@ -119,7 +119,7 @@ async function recoverTasksUnlocked() {
     const executor = await hasOffscreenDocument() ? await getOffscreenExecutorState() : null;
     if (executor?.activeJobId === active.jobId) return store;
     active.status = 'error';
-    active.message = '后台执行已中断，可重试未完成的图片';
+    Object.assign(active, PixivMessages.make('job.interrupted'));
     active.updatedAt = Date.now();
     await saveTaskStore(store);
     return store;
@@ -127,17 +127,17 @@ async function recoverTasksUnlocked() {
 async function startDownloadJobUnlocked(rawJob) {
     const store = await recoverTasksUnlocked();
     if (store.tasks.some(task => ACTIVE_JOB_STATUSES.has(task.status))) {
-        throw new Error('已有任务正在执行，请先暂停或停止它');
+        throw PixivMessages.error('error.busy');
     }
     const job = normalizeJob(rawJob);
     while (store.tasks.length >= 50) {
         const oldest = store.tasks.filter(task => task.status === 'completed' && !task.failed)
             .sort((a, b) => (a.updatedAt || a.startedAt || 0) - (b.updatedAt || b.startedAt || 0))[0];
-        if (!oldest) throw new Error('任务记录已满，暂无可自动清理的已完成任务，请先移除已结束的记录');
+        if (!oldest) throw PixivMessages.error('error.historyFull');
         store.tasks = store.tasks.filter(task => task.jobId !== oldest.jobId);
     }
     const now = Date.now();
-    const task = { jobId: job.jobId, type: job.type, title: String(rawJob.title || 'Pixiv 图片').slice(0, 120),
+    const task = { jobId: job.jobId, type: job.type, title: String(rawJob.title || '').slice(0, 120),
         artworkId: String(rawJob.artworkId || '').slice(0, 32), status: 'starting',
         processed: 0, total: job.images.length, parts: 0, failed: 0, sequence: 0,
         startedAt: now, updatedAt: now, job, checkpoint: emptyCheckpoint() };
@@ -147,11 +147,11 @@ async function startDownloadJobUnlocked(rawJob) {
 async function resumeJobUnlocked(jobId, retry) {
     const store = await recoverTasksUnlocked();
     if (store.tasks.some(task => ACTIVE_JOB_STATUSES.has(task.status))) {
-        throw new Error('请先暂停或停止当前正在执行的任务');
+        throw PixivMessages.error('error.busy');
     }
     const task = findTask(store, jobId);
     if (!task.job || (retry ? !publicState(task).canRetry : task.status !== 'paused')) {
-        throw new Error('当前任务不支持此操作');
+        throw PixivMessages.error('error.unsupported');
     }
     if (retry) {
         task.checkpoint.failed = [];
@@ -164,21 +164,21 @@ async function activateTaskUnlocked(store, task, retry) {
     task.status = 'starting';
     task.runId = crypto.randomUUID();
     task.sequence = 0;
-    task.message = '正在启动任务…';
+    Object.assign(task, PixivMessages.make('job.starting'));
     task.updatedAt = Date.now();
     await saveTaskStore(store);
     try {
         await setupOffscreenDocument();
         const response = await chrome.runtime.sendMessage({ target: 'offscreen', action: 'start-job',
             job: { ...task.job, runId: task.runId, checkpoint: task.checkpoint, retry } });
-        if (!response?.accepted) throw new Error(response?.error || '后台执行器未接受任务');
+        if (!response?.accepted) throw PixivMessages.fromResponse(response, 'error.notAccepted');
         task.status = 'running';
-        task.message = '正在下载…';
+        Object.assign(task, PixivMessages.make('job.running'));
         await saveTaskStore(store);
         return { jobId: task.jobId, state: publicState(task), ...publicStore(store) };
     } catch (error) {
         task.status = 'error';
-        task.message = getErrorMessage(error, '任务启动失败，可重试');
+        Object.assign(task, PixivMessages.describe(error, 'error.start'));
         await saveTaskStore(store);
         await closeOffscreenDocumentForJobUnlocked(task.jobId).catch(() => {});
         throw error;
@@ -189,7 +189,7 @@ async function interruptJobUnlocked(jobId, intent) {
     const task = jobId ? findTask(store, jobId) : currentState(store);
     if (task?.status === 'paused' && intent === 'cancel') {
         task.status = 'cancelled';
-        task.message = '已停止，已提交下载继续执行';
+        Object.assign(task, PixivMessages.make('job.stopped'));
         await saveTaskStore(store);
         if (await hasOffscreenDocument()) {
             await chrome.runtime.sendMessage({ target: 'offscreen', action: 'cancel-paused-job', jobId: task.jobId });
@@ -199,11 +199,11 @@ async function interruptJobUnlocked(jobId, intent) {
     if (!task || !ACTIVE_JOB_STATUSES.has(task.status)) return { state: publicState(task), ...publicStore(store) };
     if (['pausing', 'cancelling'].includes(task.status)) return { state: publicState(task), ...publicStore(store) };
     task.status = intent === 'pause' ? 'pausing' : 'cancelling';
-    task.message = intent === 'pause' ? '正在暂停…' : '正在停止，已提交下载继续执行';
+    Object.assign(task, PixivMessages.make(intent === 'pause' ? 'job.pausing' : 'job.stopping'));
     await saveTaskStore(store);
     if (!await hasOffscreenDocument()) {
         task.status = 'error';
-        task.message = '后台执行器已退出，可重试';
+        Object.assign(task, PixivMessages.make('job.exited'));
         await saveTaskStore(store);
     } else {
         // 先响应，再控制下载和写入终态，避免与本队列形成环形等待。
@@ -215,7 +215,7 @@ async function interruptJobUnlocked(jobId, intent) {
 async function dismissJobUnlocked(jobId) {
     const store = await getTaskStore();
     const task = findTask(store, jobId);
-    if (!TERMINAL_JOB_STATUSES.has(task.status)) throw new Error('请先停止任务，再移除记录');
+    if (!TERMINAL_JOB_STATUSES.has(task.status)) throw PixivMessages.error('error.stopBeforeRemove');
     store.tasks = store.tasks.filter(item => item.jobId !== jobId);
     await saveTaskStore(store);
     return publicStore(store);
@@ -232,7 +232,11 @@ async function updateJobStateUnlocked(update) {
     const preserveIntent = ['pausing', 'cancelling'].includes(task.status) && status === 'running';
     if (preserveIntent) status = task.status;
     task.status = status;
-    if (!preserveIntent) task.message = String(update.message || task.message || '').slice(0, 240);
+    if (!preserveIntent) {
+        task.message = String(update.message || '').slice(0, 240);
+        task.messageKey = typeof update.messageKey === 'string' ? update.messageKey.slice(0, 80) : null;
+        task.messageParams = update.messageKey && update.messageParams && typeof update.messageParams === 'object' ? update.messageParams : {};
+    }
     for (const field of ['processed', 'parts', 'failed']) {
         task[field] = normalizeNonNegativeInteger(update[field], task[field] || 0);
     }
@@ -273,7 +277,7 @@ async function setupOffscreenDocument() {
 }
 async function getOffscreenExecutorState() {
     const response = await chrome.runtime.sendMessage({ target: 'offscreen', action: 'get-executor-state' });
-    if (!response || !Number.isInteger(response.pendingDownloads)) throw new Error('无法读取后台执行器状态');
+    if (!response || !Number.isInteger(response.pendingDownloads)) throw PixivMessages.error('error.executorState');
     return response;
 }
 async function closeOffscreenDocumentForJobUnlocked() {
@@ -287,7 +291,7 @@ async function closeOffscreenDocumentForJobUnlocked() {
 }
 function controlBrowserDownload(downloadId, operation) {
     if (!Number.isInteger(downloadId) || !['pause', 'resume'].includes(operation)) {
-        throw new Error('下载控制参数无效');
+        throw PixivMessages.error('error.control');
     }
     return new Promise((resolve, reject) => chrome.downloads[operation](downloadId, () => {
         const error = chrome.runtime.lastError;
