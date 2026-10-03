@@ -45,7 +45,7 @@ function fixture(t, options = {}) {
                 await finalReportGate;
             }
             try { return { success: true, ...await worker.handleMessage(message, sender(page)) }; }
-            catch (error) { return { success: false, error: error.message }; }
+            catch (error) { return { success: false, error: error.message, ...worker.PixivMessages.describe(error) }; }
         }
         if (!offscreenListener) throw new Error('No offscreen receiver');
         return new Promise((resolve, reject) => {
@@ -135,6 +135,7 @@ function fixture(t, options = {}) {
             }
         });
         vm.runInContext(read('lib/jszip.min.js'), offscreen);
+        vm.runInContext(read('messages.js'), offscreen);
         vm.runInContext(read('offscreen.js'), offscreen);
     }
     function loadWorker() {

@@ -1,5 +1,6 @@
 // background.js — 后台入口与下载参数校验
 importScripts('config.js');
+importScripts('messages.js');
 importScripts('task-runtime.js');
 
 function createBrowserDownload(rawOptions) {
@@ -13,7 +14,7 @@ function createBrowserDownload(rawOptions) {
                 return;
             }
             if (!Number.isInteger(downloadId)) {
-                reject(new Error('Chrome 未能创建下载任务'));
+                reject(PixivMessages.error('error.createDownload'));
                 return;
             }
             resolve({ downloadId });
@@ -23,7 +24,7 @@ function createBrowserDownload(rawOptions) {
 
 function getBrowserDownload(downloadId) {
     if (!Number.isInteger(downloadId)) {
-        throw new Error('下载任务 ID 无效');
+        throw PixivMessages.error('error.downloadId');
     }
 
     return new Promise((resolve, reject) => {
@@ -51,12 +52,12 @@ function getBrowserDownload(downloadId) {
 
 function normalizeJob(rawJob) {
     if (!rawJob || !['direct', 'zip'].includes(rawJob.type)) {
-        throw new Error('下载任务类型无效');
+        throw PixivMessages.error('error.jobType');
     }
     if (!Array.isArray(rawJob.images)
         || rawJob.images.length === 0
         || rawJob.images.length > MAX_JOB_IMAGES) {
-        throw new Error(`任务图片数量必须在 1～${MAX_JOB_IMAGES} 之间`);
+        throw PixivMessages.error('error.imageLimit', { max: MAX_JOB_IMAGES });
     }
 
     const images = rawJob.images.map((image, arrayIndex) => {
@@ -109,7 +110,7 @@ function normalizeDownloadOptions(rawOptions) {
     const url = String(rawOptions?.url || '');
     const extensionOrigin = `blob:${chrome.runtime.getURL('')}`;
     if (!url.startsWith(extensionOrigin)) {
-        throw new Error('后台下载只允许使用本扩展创建的 Blob 地址');
+        throw PixivMessages.error('error.blob');
     }
 
     return {
@@ -125,10 +126,10 @@ function validatePximgUrl(url) {
     try {
         parsed = new URL(url);
     } catch {
-        throw new Error('Pixiv 图片地址无效');
+        throw PixivMessages.error('error.pximg');
     }
     if (parsed.protocol !== 'https:' || parsed.hostname !== 'i.pximg.net') {
-        throw new Error('拒绝下载非 Pixiv 图片域名');
+        throw PixivMessages.error('error.pximgHost');
     }
     return parsed.href;
 }
@@ -136,7 +137,7 @@ function validatePximgUrl(url) {
 function validateFilename(filename) {
     const value = String(filename || '').trim();
     if (!value || value.length > 220 || /[\\/:*?"<>|\u0000-\u001f\u007f]/.test(value)) {
-        throw new Error('下载文件名无效');
+        throw PixivMessages.error('error.filename');
     }
     return value;
 }
@@ -159,13 +160,13 @@ function normalizeNonNegativeInteger(value, fallback) {
 function assertExtensionPageSender(sender) {
     const extensionRoot = chrome.runtime.getURL('');
     if (!sender.url?.startsWith(extensionRoot)) {
-        throw new Error('该操作只能由扩展页面发起');
+        throw PixivMessages.error('error.extensionPage');
     }
 }
 
 function assertOffscreenSender(sender) {
     if (sender.url !== chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)) {
-        throw new Error('该操作只能由后台执行器发起');
+        throw PixivMessages.error('error.executorOnly');
     }
 }
 

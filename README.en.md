@@ -14,6 +14,7 @@ A Chrome extension for previewing, selecting, and downloading original images fr
 - Save original images individually or as ZIP archives, automatically split by image count and size.
 - Keep downloading after closing the popup or switching tabs. Pause, resume, or retry unfinished work.
 - Keep a local task history and customize filenames with templates.
+- Use the interface in Simplified Chinese or English, following the browser UI language by default or a manual choice.
 
 ## Installation
 
@@ -29,12 +30,12 @@ Requires **Chrome 116 or later** and a Pixiv account signed in through the brows
 
 ## Usage
 
-The extension interface currently uses Chinese labels.
+The interface supports Simplified Chinese and English. Choose a language from the gear icon.
 
 1. Open `https://www.pixiv.net/artworks/<artwork-id>`.
-2. Click the extension icon and select images, or choose **Select all** (全选).
-3. Click **Download** (下载) to save individual images, or **Download ZIP** (打包下载) to create an archive. With multiple selected images or expected archive parts, the labels become 逐张下载 or 分卷下载.
-4. Check progress in **Download tasks** (下载任务). Use the task-list icon at the top to view all records, or the gear icon to change download settings.
+2. Click the extension icon and select images, or choose **Select all**.
+3. Click **Download** to save individual images, or **Download ZIP** to create an archive. With multiple selected images or expected archive parts, the labels become **Download (N)** or **Split ZIP (~N)**.
+4. Check progress in **Download tasks**. Use the task-list icon at the top to view all records, or the gear icon to change download settings.
 
 The gallery initially shows up to three rows. For more than nine images, click the ninth tile to expand the full gallery, then collapse it when needed. Collapsing preserves selections, and **Select all** includes hidden images.
 
@@ -44,9 +45,9 @@ One task runs at a time. Pause or stop the current task before starting another.
 
 | Action | Behavior |
 | --- | --- |
-| Pause / Resume (暂停 / 继续) | Pause processing and the current browser download. Resume skips images and ZIP parts already saved. |
-| Retry (重试) | Download failed or unfinished items while keeping successful downloads. |
-| Stop (停止) | Stop further processing. Downloads already handed to the browser continue. |
+| Pause / Resume | Pause processing and the current browser download. Resume skips images and ZIP parts already saved. |
+| Retry | Download failed or unfinished items while keeping successful downloads. |
+| Stop | Stop further processing. Downloads already handed to the browser continue. |
 | × | Remove a finished task record without deleting downloaded files. |
 
 The main view shows up to three unfinished tasks, prioritizing the active task. Successful tasks move to the full list. Records are stored locally and remain available after reopening the popup or browser. If a browser restart interrupts a task, retry its unfinished items.
@@ -56,6 +57,16 @@ Up to 50 records are retained. When creating a task at the limit, the oldest suc
 ## Download settings
 
 Open the gear icon at the top. Changes are saved automatically.
+
+### Interface language
+
+Choose **简体中文** or **English** under **语言 / Language**. Changes apply immediately and are saved. Without a manual choice, English browser UI languages use English; Chinese and unsupported browser languages use Simplified Chinese. An unknown or invalid saved language also falls back to Chinese. Automatically detected defaults are not stored as manual preferences, so reopening the popup checks the browser UI language again.
+
+Switching languages preserves image selection, gallery expansion, and active downloads. Artwork titles, artist names, and filename templates are not translated. External error details and raw errors in older task records may retain their original language. The browser's download and extension management pages use the browser UI language.
+
+### Closing the popup after starting a download
+
+**Close popup after starting a download** is enabled by default. After a download or ZIP task (including multiple images and split archives) is accepted by the background executor, the popup closes so you can use the browser's save prompt. Downloads continue in the background. If startup fails, the popup stays open with the error. Disable this setting to keep the popup open; your choice is saved automatically.
 
 ### Filename templates
 
@@ -89,20 +100,20 @@ Report problems through [Issues](https://github.com/Tainiraito/pixiv-image-extra
 
 Follow the [documentation guide](docs/DOCUMENTATION_GUIDE.md) when writing READMEs and release notes.
 
-The extension uses Manifest V3. `content.js` extracts artwork details; `background.js` and `task-runtime.js` manage tasks; `offscreen.js` downloads images and creates ZIP archives; `popup.js` / `popup.html` provide the interface. Shared configuration lives in `config.js`.
+The extension uses Manifest V3. `content.js` extracts artwork details; `background.js` and `task-runtime.js` manage tasks; `offscreen.js` downloads images and creates ZIP archives; `popup.js` / `popup.html` provide the interface. Shared configuration lives in `config.js`. See the [localization guide](docs/LOCALIZATION.md) for language resources and how to add a language.
 
 No build step is required. Clone the repository and load it using the installation steps above. Regression tests use the built-in Node.js test runner with no npm dependencies:
 
 ```shell
-node --test tests/download-lifecycle.test.cjs
+node --test tests/*.test.cjs
 ```
 
 If the environment prevents spawning test processes, use Node.js 24:
 
 ```shell
-node --test --test-isolation=none tests/download-lifecycle.test.cjs
+node --test --test-isolation=none tests/*.test.cjs
 ```
 
-Tests simulate Chrome APIs and image responses and inspect ZIP contents. They cover task concurrency, history, pause/resume, retries, and resource cleanup. They do not replace validation in a real browser signed in to Pixiv.
+Tests simulate Chrome APIs and image responses and inspect ZIP contents. They cover task concurrency, history, pause/resume, retries, resource cleanup, language selection, synchronization, and catalog completeness. They do not replace validation in a real browser signed in to Pixiv.
 
 </details>

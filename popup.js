@@ -1,6 +1,8 @@
-// popup.js — Pixiv 图片提取 v1.4.0
+// popup.js — Pixiv 图片提取 v1.5.0
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    const { t } = PixivI18n;
+    await PixivI18n.init();
     const header = document.getElementById('header');
     const titleEl = document.getElementById('artwork-title');
     const authorEl = document.getElementById('artwork-author');
@@ -32,6 +34,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const taskCount = document.getElementById('task-count');
     const statusText = document.getElementById('status-text');
 
+    const autoCloseInput = document.getElementById('auto-close-popup');
+    const AUTO_CLOSE_STORAGE_KEY = 'pixiv_auto_close_popup';
+    const shouldAutoClose = () => localStorage.getItem(AUTO_CLOSE_STORAGE_KEY) !== 'false';
+    autoCloseInput.checked = shouldAutoClose();
+    autoCloseInput.addEventListener('change', () => {
+        localStorage.setItem(AUTO_CLOSE_STORAGE_KEY, String(autoCloseInput.checked));
+    });
+    window.addEventListener('storage', event => {
+        if (event.key === AUTO_CLOSE_STORAGE_KEY || event.key === null) autoCloseInput.checked = shouldAutoClose();
+    });
+
     const TEMPLATE_STORAGE_KEY = 'pixiv_filename_template';
     const ZIP_BATCH_SIZE_STORAGE_KEY = 'pixiv_zip_batch_size';
     const DEFAULT_TEMPLATE = 'pixiv_{id}_{author}_{title}_p{index}';
@@ -56,17 +69,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const historyCards = new Map();
     const pendingTaskActions = new Set();
 
+    let statusMessage = '', errorMessage = '';
+    const languageSelect = document.getElementById('language-select');
+    for (const locale of PixivI18n.registry) {
+        const option = document.createElement('option');
+        option.value = locale.code; option.textContent = locale.nativeName;
+        languageSelect.append(option);
+    }
+    languageSelect.addEventListener('change', () => PixivI18n.select(languageSelect.value)
+        .catch(error => { languageSelect.value = PixivI18n.language; setStatus(PixivMessages.describe(error), 'error'); }));
+    PixivI18n.onChange(refreshLanguage);
     // ─── 初始化 ───
     filenameInput.value = localStorage.getItem(TEMPLATE_STORAGE_KEY) || '';
     zipBatchSizeInput.min = String(ZIP_IMAGES_PER_PART.MIN);
     zipBatchSizeInput.max = String(ZIP_IMAGES_PER_PART.MAX);
     zipBatchSizeInput.value = String(ZIP_IMAGES_PER_PART.DEFAULT);
-    zipBatchSizeHint.textContent = `默认 ${ZIP_IMAGES_PER_PART.DEFAULT} 张，`+
-        `同时按约 ${formatMegabytes(ZIP_BYTES_PER_PART.DEFAULT)}MB 自动切卷`;
+    zipBatchSizeHint.textContent = t('settings.zipHint', { count: ZIP_IMAGES_PER_PART.DEFAULT, size: formatMegabytes(ZIP_BYTES_PER_PART.DEFAULT) });
     zipBatchSizeInput.value = normalizeZipBatchSize(
         localStorage.getItem(ZIP_BATCH_SIZE_STORAGE_KEY)
     );
-    zipBatchValue.value = zipBatchSizeInput.value + ' 张';
+    zipBatchValue.value = t('images.unit', { count: Number(zipBatchSizeInput.value) });
 
     chrome.runtime.onMessage.addListener((message, sender) => {
         if (sender.id !== chrome.runtime.id
@@ -84,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
     zipBatchSizeInput.addEventListener('input', () => {
         const batchSize = getZipBatchSize();
         zipBatchSizeInput.value = batchSize;
-        zipBatchValue.value = batchSize + ' 张';
+        zipBatchValue.value = t('images.unit', { count: batchSize });
         localStorage.setItem(ZIP_BATCH_SIZE_STORAGE_KEY, String(batchSize));
         updateSelectionUI();
     });
@@ -109,6 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
         grid.querySelector('.gallery-more')?.focus({ preventScroll: true });
     });
 
+    refreshLanguage();
     doExtract();
     restoreBackgroundJob();
 
@@ -127,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
             if (!isPixivArtworkUrl(tab?.url)) {
-                showError('请先打开 Pixiv 作品详情页');
+                showError(PixivMessages.make('error.openArtwork'));
                 return;
             }
 
@@ -136,15 +159,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 response = await chrome.tabs.sendMessage(tab.id, { action: 'extract-images' });
             } catch (error) {
                 console.error('[Pixiv 提取] 无法连接内容脚本:', error);
-                throw new Error('无法连接到作品页，请刷新 Pixiv 页面后重试');
+                throw PixivMessages.error('error.connectPage');
             }
 
             if (!response?.success) {
-                showError(response?.error || '提取失败');
+                showError(PixivMessages.describe(PixivMessages.fromResponse(response, 'error.extract')));
                 return;
             }
             if (!Array.isArray(response.images) || response.images.length === 0) {
-                showError('Pixiv 未返回可下载的图片');
+                showError(PixivMessages.make('error.noImages'));
                 return;
             }
 
@@ -156,14 +179,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }));
 
             currentArtworkId = String(response.artworkId || 'unknown');
-            currentTitle = String(response.title || '未知作品');
-            currentAuthor = String(response.author || '未知作者');
+            currentTitle = String(response.title || '');
+            currentAuthor = String(response.author || '');
             selectedIndices.clear();
             galleryExpanded = false;
 
-            titleEl.textContent = currentTitle;
-            authorEl.textContent = currentAuthor;
-            countEl.textContent = `${allImages.length} 张图片`;
+            titleEl.textContent = currentTitle || t('artwork.unknown');
+            authorEl.textContent = currentAuthor || t('author.unknown');
+            countEl.textContent = t('images.count', { count: allImages.length });
             header.style.display = '';
 
             renderGrid(allImages);
@@ -175,14 +198,14 @@ document.addEventListener('DOMContentLoaded', () => {
             syncTaskControls();
         } catch (error) {
             console.error('[Pixiv 提取] 异常:', error);
-            showError(getErrorMessage(error, '提取过程中发生错误'));
+            showError(PixivMessages.describe(error, 'error.extractUnexpected'));
         }
     }
 
     // ─── 任务列表与操作 ───
     async function restoreBackgroundJob() {
         try { applyTaskSnapshot(await sendBackgroundRequest('list-download-jobs')); }
-        catch (error) { setStatus('无法读取任务列表：' + getErrorMessage(error, '未知错误'), 'error'); }
+        catch (error) { setStatus(PixivMessages.make('error.history', { detail: errorDescriptor(error) }), 'error'); }
     }
 
     function applyTaskSnapshot(snapshot) {
@@ -219,6 +242,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             applyTaskSnapshot(response);
             setStatus('');
+            // Only close after the executor has accepted the task; failures stay visible.
+            if (shouldAutoClose()) window.close();
         } finally {
             resetSubmittingJob();
             renderTasks();
@@ -227,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function sendBackgroundRequest(action, payload = {}) {
         return chrome.runtime.sendMessage({ target: 'background', action, ...payload }).then(response => {
-            if (!response?.success) throw new Error(response?.error || '后台服务无响应');
+            if (!response?.success) throw PixivMessages.fromResponse(response);
             return response;
         });
     }
@@ -243,7 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const badge = document.createElement('span');
         badge.className = 'task-badge';
         const dismiss = makeTaskButton('dismiss-download-job', '×', 'task-dismiss');
-        dismiss.title = '移除记录，不删除已下载的文件';
+        dismiss.title = t('task.dismissHint');
         head.append(title, badge, dismiss);
 
         const progress = document.createElement('progress');
@@ -252,10 +277,10 @@ document.addEventListener('DOMContentLoaded', () => {
         summary.className = 'task-summary';
         const actions = document.createElement('div');
         actions.className = 'task-actions';
-        const pause = makeTaskButton('pause-download-job', '暂停');
-        const resume = makeTaskButton('resume-download-job', '继续');
-        const retry = makeTaskButton('retry-download-job', '重试');
-        const stop = makeTaskButton('cancel-download-job', '停止');
+        const pause = makeTaskButton('pause-download-job', t('action.pause'));
+        const resume = makeTaskButton('resume-download-job', t('action.resume'));
+        const retry = makeTaskButton('retry-download-job', t('action.retry'));
+        const stop = makeTaskButton('cancel-download-job', t('action.stop'));
         actions.append(pause, resume, retry, stop);
         const detail = document.createElement('div');
         detail.className = 'task-detail';
@@ -279,6 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 || (b.updatedAt || b.startedAt || 0) - (a.updatedAt || a.startedAt || 0));
         taskSection.hidden = unfinished.length === 0;
         taskCount.textContent = String(unfinished.length);
+        document.getElementById('task-overflow-label').textContent = t('task.count', { count: unfinished.length });
         taskOverflow.hidden = unfinished.length <= 3;
         document.getElementById('history-count').textContent = String(taskStates.length);
         document.getElementById('history-empty').hidden = taskStates.length > 0;
@@ -291,8 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const [id, nodes] of cards) {
             if (!ids.has(id)) { nodes.card.remove(); cards.delete(id); }
         }
-        const labels = { starting: '启动中', running: '进行中', pausing: '正在暂停',
-            paused: '已暂停', cancelling: '正在停止', cancelled: '已停止', completed: '已完成', error: '失败' };
+        const labels = Object.fromEntries(['starting', 'running', 'pausing', 'paused', 'cancelling', 'cancelled', 'completed', 'error'].map(key => [key, t('status.' + key)]));
         states.forEach((state, index) => {
             let nodes = cards.get(state.jobId);
             if (!nodes) { nodes = createTaskCard(state); cards.set(state.jobId, nodes); }
@@ -306,27 +331,29 @@ document.addEventListener('DOMContentLoaded', () => {
             const pending = pendingTaskActions.has(state.jobId);
             const hasFailures = state.status === 'error' || failed > 0;
             card.dataset.status = hasFailures ? 'error' : state.status;
-            title.textContent = state.title || 'Pixiv 图片';
+            title.textContent = state.title || t(state.titleKey || 'task.defaultTitle');
             title.title = title.textContent;
-            badge.textContent = state.status === 'completed' && failed > 0 ? '部分失败' : labels[state.status] || state.status;
+            badge.textContent = state.status === 'completed' && failed > 0 ? t('status.partial') : labels[state.status] || state.status;
             progress.max = Math.max(1, total);
             progress.value = Math.min(total, processed);
-            progress.setAttribute('aria-label', title.textContent + '，已处理 ' + processed + '/' + total);
-            summary.textContent = (state.type === 'zip' ? 'ZIP ' : '图片 ') + Math.max(0, processed - failed) + '/' + total
-                + (state.type === 'zip' ? ' · ' + (state.parts || 0) + ' 卷' : '')
-                + (failed ? ' · ' + failed + ' 张失败' : '');
-            summary.title = [state.artworkId ? '#' + state.artworkId : '', state.message].filter(Boolean).join(' · ');
-            card.setAttribute('aria-label', title.textContent + '，' + badge.textContent + '，' + summary.textContent);
+            progress.setAttribute('aria-label', t('task.progress', { title: title.textContent, processed, total }));
+            summary.textContent = t(state.type === 'zip' ? 'task.zip' : 'task.images', { saved: Math.max(0, processed - failed), total })
+                + (state.type === 'zip' ? t('task.parts', { count: state.parts || 0 }) : '')
+                + (failed ? t('task.failed', { count: failed }) : '');
+            summary.title = [state.artworkId ? '#' + state.artworkId : '', taskMessage(state)].filter(Boolean).join(' · ');
+            card.setAttribute('aria-label', [title.textContent, badge.textContent, summary.textContent].join(' · '));
             dismiss.hidden = !['completed', 'error', 'cancelled'].includes(state.status);
             dismiss.disabled = pending;
-            dismiss.setAttribute('aria-label', '移除任务：' + title.textContent);
+            dismiss.setAttribute('aria-label', t('task.dismiss', { title: title.textContent }));
+            dismiss.title = t('task.dismissHint');
+            for (const [button, key] of [[pause,'pause'],[resume,'resume'],[retry,'retry'],[stop,'stop']]) button.textContent = t('action.' + key);
             pause.hidden = !active;
             pause.disabled = transitioning || pending;
             resume.hidden = !state.canResume;
             resume.disabled = isBusy || pending;
             retry.hidden = !state.canRetry;
             retry.disabled = isBusy || pending;
-            for (const button of [resume, retry]) button.title = isBusy ? '请先暂停或停止正在执行的任务' : '';
+            for (const button of [resume, retry]) button.title = isBusy ? t('task.busy') : '';
             stop.hidden = !active && state.status !== 'paused';
             stop.disabled = transitioning || pending;
         });
@@ -343,7 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             applyTaskSnapshot(await sendBackgroundRequest(button.dataset.taskAction, { jobId }));
         } catch (error) {
-            setStatus(getErrorMessage(error, '任务操作失败'), 'error');
+            setStatus(PixivMessages.describe(error, 'error.taskAction'), 'error');
         } finally {
             pendingTaskActions.delete(jobId);
             renderTasks();
@@ -363,12 +390,12 @@ document.addEventListener('DOMContentLoaded', () => {
             card.dataset.imageIndex = String(index);
             card.tabIndex = 0;
             card.setAttribute('role', 'checkbox');
-            card.setAttribute('aria-label', `选择图片 ${image.index}`);
+            card.setAttribute('aria-label', t('gallery.select', { index: image.index }));
             card.setAttribute('aria-checked', 'false');
 
             const preview = document.createElement('img');
             preview.src = image.previewUrl;
-            preview.alt = `图片 ${image.index}`;
+            preview.alt = t('gallery.image', { index: image.index });
             preview.loading = 'lazy';
             preview.draggable = false;
 
@@ -393,7 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const more = document.createElement('button');
             more.type = 'button';
             more.className = 'gallery-more';
-            more.setAttribute('aria-label', '查看全部 ' + images.length + ' 张图片');
+            more.setAttribute('aria-label', t('gallery.allLabel', { count: images.length }));
             more.setAttribute('aria-expanded', 'false');
             const mosaic = document.createElement('span');
             mosaic.className = 'gallery-mosaic';
@@ -407,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const label = document.createElement('span');
             label.className = 'gallery-more-label';
-            label.textContent = '查看全部' + images.length + '张';
+            label.textContent = t('gallery.all', { count: images.length });
             more.append(mosaic, label);
             more.addEventListener('click', () => {
                 galleryExpanded = true;
@@ -439,16 +466,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         selectedCount.textContent = count;
         totalCount.textContent = total;
-        toggleAllBtn.textContent = count === total && total > 0 ? '取消全选' : '全选';
+        toggleAllBtn.textContent = count === total && total > 0 ? t('selection.none') : t('selection.all');
         toggleAllBtn.disabled = isBusy;
 
         downloadBtn.disabled = isBusy || count === 0;
-        downloadBtn.textContent = count > 1 ? `逐张下载 (${count})` : '下载';
+        downloadBtn.textContent = count > 1 ? t('download.multiple', { count }) : t('download.single');
 
         zipBtn.disabled = isBusy || count === 0;
         zipBtn.textContent = count > getZipBatchSize()
-            ? `分卷下载 (约 ${estimatedParts} 卷)`
-            : '打包下载';
+            ? t('download.parts', { count: estimatedParts })
+            : t('download.zip');
     }
 
     toggleAllBtn.addEventListener('click', () => {
@@ -482,12 +509,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             });
 
-            setStatus('正在创建下载任务...', 'info');
+            setStatus(PixivMessages.make('notice.createDirect'), 'info');
             await submitBackgroundJob({ type: 'direct', images });
         } catch (error) {
             resetSubmittingJob();
             console.error('[后台下载] 启动失败:', error);
-            setStatus(`下载启动失败：${getErrorMessage(error, '未知错误')}`, 'error');
+            setStatus(PixivMessages.make('error.startDirect', { detail: errorDescriptor(error) }), 'error');
         }
     });
 
@@ -501,7 +528,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 extension: getExtFromUrl(image.originalUrl)
             }));
 
-            setStatus('正在创建打包任务...', 'info');
+            setStatus(PixivMessages.make('notice.createZip'), 'info');
             await submitBackgroundJob({
                 type: 'zip',
                 images,
@@ -512,7 +539,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             resetSubmittingJob();
             console.error('[后台打包] 启动失败:', error);
-            setStatus(`打包启动失败：${getErrorMessage(error, '未知错误')}`, 'error');
+            setStatus(PixivMessages.make('error.startZip', { detail: errorDescriptor(error) }), 'error');
         }
     });
 
@@ -558,11 +585,11 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             parsed = new URL(url);
         } catch {
-            throw new Error('Pixiv 返回了无效的图片地址');
+            throw PixivMessages.error('error.invalidImage');
         }
 
         if (parsed.protocol !== 'https:' || parsed.hostname !== 'i.pximg.net') {
-            throw new Error(`拒绝访问非 Pixiv 图片地址：${parsed.hostname || '未知域名'}`);
+            throw PixivMessages.error('error.imageHost', { host: parsed.hostname });
         }
         return parsed.href;
     }
@@ -601,21 +628,54 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.round(bytes / (1024 * 1024));
     }
 
-    function getErrorMessage(error, fallback) {
-        const message = typeof error?.message === 'string' ? error.message.trim() : '';
-        return message ? message.slice(0, 180) : fallback;
+    function errorDescriptor(error) { return PixivMessages.describe(error); }
+    function displayMessage(message) {
+        if (!message?.messageKey) return String(message || '');
+        const params = Object.fromEntries(Object.entries(message.messageParams || {}).map(([key, value]) =>
+            [key, value?.messageKey ? displayMessage(value) : value]));
+        return t(message.messageKey, params);
     }
-
-    // ─── 通用 UI ───
+    function taskMessage(state) {
+        if (state.messageKey) return displayMessage(state);
+        // Old tasks use structured status/counts; preserve unknown external error details.
+        if (state.status === 'completed') return t(state.failed ? 'job.partial' : state.type === 'zip' ? 'job.zipComplete' : 'job.complete',
+            { count: Math.max(0, state.processed - (state.failed || 0)), total: state.total, failed: state.failed, parts: state.parts });
+        const key = { starting: 'job.starting', running: 'job.running', pausing: 'job.pausing', paused: 'job.paused',
+            cancelling: 'job.stopping', cancelled: 'job.stopped' }[state.status];
+        return key ? t(key) : state.message || t('status.error');
+    }
+    function refreshLanguage() {
+        PixivI18n.render();
+        languageSelect.value = PixivI18n.language;
+        titleEl.textContent = currentTitle || t('artwork.unknown');
+        authorEl.textContent = currentAuthor || t('author.unknown');
+        countEl.textContent = t('images.count', { count: allImages.length });
+        zipBatchSizeHint.textContent = t('settings.zipHint', { count: ZIP_IMAGES_PER_PART.DEFAULT, size: formatMegabytes(ZIP_BYTES_PER_PART.DEFAULT) });
+        zipBatchValue.value = t('images.unit', { count: getZipBatchSize() });
+        for (const card of grid.querySelectorAll('.image-card')) {
+            const image = allImages[Number(card.dataset.imageIndex)];
+            card.setAttribute('aria-label', t('gallery.select', { index: image.index }));
+            card.querySelector('img').alt = t('gallery.image', { index: image.index });
+        }
+        const more = grid.querySelector('.gallery-more');
+        if (more) {
+            more.setAttribute('aria-label', t('gallery.allLabel', { count: allImages.length }));
+            more.querySelector('.gallery-more-label').textContent = t('gallery.all', { count: allImages.length });
+        }
+        updateSelectionUI(); renderTasks();
+        errorMsg.textContent = displayMessage(errorMessage);
+        statusText.textContent = displayMessage(statusMessage);
+    }
     function showError(message) {
+        errorMessage = message;
         loadingEl.style.display = 'none';
         errorState.style.display = '';
-        errorMsg.textContent = message;
+        errorMsg.textContent = displayMessage(message);
     }
-
-    function setStatus(text, type) {
-        statusText.textContent = text;
-        statusText.hidden = !text;
-        statusText.className = `status-text status-${type}`;
+    function setStatus(message, type) {
+        statusMessage = message;
+        statusText.textContent = displayMessage(message);
+        statusText.hidden = !message;
+        statusText.className = 'status-text status-' + type;
     }
 });

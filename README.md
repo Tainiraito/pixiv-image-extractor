@@ -14,6 +14,7 @@
 - 逐张保存原图，或打包为 ZIP；大型作品按张数和容量自动分卷。
 - 关闭弹窗、切换标签页后继续下载；任务支持暂停、继续和重试未完成部分。
 - 保存本地任务历史，并通过文件名模板自定义下载文件名称。
+- 支持简体中文和英语界面，默认跟随浏览器界面语言，也可手动选择。
 
 ## 安装
 
@@ -55,6 +56,16 @@
 
 点击顶部齿轮打开设置，修改后自动保存。
 
+### 界面语言
+
+在「语言 / Language」中选择「简体中文」或「English」，选择后立即生效并保存。未手动选择时，英语浏览器使用英语，中文及其他未支持的浏览器语言使用简体中文；未知或无效的已保存语言也回退中文。自动识别的结果不会保存为手动偏好，重开弹窗时会重新读取浏览器界面语言。
+
+切换语言保留图片选择、预览展开状态及正在执行的下载任务。作品标题、作者名和文件名模板不翻译；外部错误详情及旧任务中的原始错误提示可能保留原文。浏览器自己的下载管理和扩展管理界面使用浏览器语言。
+
+### 下载后关闭弹窗
+
+「下载后自动关闭弹窗」默认开启。点击「下载」或「打包下载」（含逐张、分卷下载），任务成功交给后台后弹窗自动关闭，方便操作浏览器的保存提示；后台下载继续进行。启动失败时保留弹窗和错误提示。关闭此设置后，弹窗保持打开；选择会自动保存。
+
 ### 文件名模板
 
 默认：`pixiv_{id}_{author}_{title}_p{index}`。扩展名自动添加，模板留空时使用默认值。
@@ -87,20 +98,20 @@
 
 撰写 README 与 Release 请遵守 [项目文档规范](docs/DOCUMENTATION_GUIDE.md)。
 
-扩展使用 Manifest V3：`content.js` 提取作品信息，`background.js` 与 `task-runtime.js` 管理任务，`offscreen.js` 执行下载和 ZIP 打包，`popup.js` / `popup.html` 提供界面。共享配置位于 `config.js`。
+扩展使用 Manifest V3：`content.js` 提取作品信息，`background.js` 与 `task-runtime.js` 管理任务，`offscreen.js` 执行下载和 ZIP 打包，`popup.js` / `popup.html` 提供界面。共享配置位于 `config.js`。本地化资源和扩展语言的步骤见 [本地化指南](docs/LOCALIZATION.md)。
 
 项目无需构建，克隆后可直接按上面的安装步骤加载。回归测试使用 Node.js 内置测试运行器，无需安装 npm 依赖：
 
 ```shell
-node --test tests/download-lifecycle.test.cjs
+node --test tests/*.test.cjs
 ```
 
 若环境禁止创建测试子进程，可使用 Node.js 24：
 
 ```shell
-node --test --test-isolation=none tests/download-lifecycle.test.cjs
+node --test --test-isolation=none tests/*.test.cjs
 ```
 
-测试模拟 Chrome API 与图片响应，并检查 ZIP 内容，覆盖任务并发、历史、暂停/继续、重试及资源清理。它们不替代真实浏览器与 Pixiv 登录环境的验证。
+测试模拟 Chrome API 与图片响应，并检查 ZIP 内容，覆盖任务并发、历史、暂停/继续、重试、资源清理及语言选择、同步和文案完整性。它们不替代真实浏览器与 Pixiv 登录环境的验证。
 
 </details>

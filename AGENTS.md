@@ -19,6 +19,11 @@ These instructions apply throughout this repository to all LLMs, coding agents, 
 - 本规范已经用户确认，后续例行文档修改直接按规范执行，无需重复请求确认。发布、推送等操作仍须遵循当前任务的授权范围。
 - This standard has been approved. Apply it to routine documentation work without requesting approval again. Publishing and pushing must still remain within the current task's authorization.
 
+## 本地化 / Localization
+
+- 修改界面文案或后台用户提示时，遵守 [docs/LOCALIZATION.md](docs/LOCALIZATION.md)，同步所有语言目录。任务持久化使用稳定文案键和参数，避免保存翻译后的提示。切换语言不得重启下载或丢失选择。
+- Follow [docs/LOCALIZATION.md](docs/LOCALIZATION.md) for UI and service messages, updating every catalog. Persist stable message keys and parameters, not translated messages. Language changes must preserve downloads and selection.
+
 ## 网络连接 / Network connections
 
 优先直连；直连失败后可临时使用下列代理，仅对当前命令或会话生效，不写入仓库或永久 Git 配置。

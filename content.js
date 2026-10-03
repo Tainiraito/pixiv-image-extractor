@@ -1,4 +1,4 @@
-// content.js — Pixiv 图片提取 v1.3.0
+// content.js — Pixiv 图片提取 v1.5.0
 // 在 Pixiv 作品页面提取所有图片 URL 和作品信息
 // Referer 头由 declarativeNetRequest 规则自动添加
 
@@ -7,7 +7,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.id === chrome.runtime.id && message?.action === 'extract-images') {
         handleExtract()
             .then(sendResponse)
-            .catch(err => sendResponse({ success: false, error: err.message || '未知错误' }));
+            .catch(err => sendResponse({ success: false, error: err.message, ...PixivMessages.describe(err) }));
         return true;
     }
 });
@@ -17,7 +17,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function handleExtract() {
     const artworkId = extractArtworkId();
     if (!artworkId) {
-        return { success: false, error: '无法识别作品 ID，请确认在作品详情页' };
+        return { success: false, ...PixivMessages.make('error.artworkId') };
     }
 
     const [detail, pages] = await Promise.all([
@@ -26,14 +26,14 @@ async function handleExtract() {
     ]);
 
     if (!pages || pages.length === 0) {
-        return { success: false, error: '未找到图片，请确认作品存在' };
+        return { success: false, ...PixivMessages.make('error.missingImages') };
     }
 
     return {
         success: true,
         artworkId,
-        title: detail?.title || '未知作品',
-        author: detail?.author || '未知作者',
+        title: detail?.title || '',
+        author: detail?.author || '',
         pageCount: pages.length,
         images: pages.map((page, i) => ({
             index: i + 1,
@@ -74,12 +74,12 @@ async function fetchArtworkDetail(artworkId) {
 async function fetchArtworkPages(artworkId) {
     const resp = await fetch(`https://www.pixiv.net/ajax/illust/${artworkId}/pages`);
     if (!resp.ok) {
-        throw new Error(`获取图片列表失败：HTTP ${resp.status}`);
+        throw PixivMessages.error('error.pagesHttp', { status: resp.status });
     }
 
     const data = await resp.json();
     if (data.error || !Array.isArray(data.body)) {
-        throw new Error(data.message || 'Pixiv 返回的图片列表格式异常');
+        throw data.message ? new Error(data.message) : PixivMessages.error('error.pagesFormat');
     }
 
     return data.body;
